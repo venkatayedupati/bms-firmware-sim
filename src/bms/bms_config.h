@@ -14,6 +14,13 @@
 
 #define BMS_PACK_CAPACITY_MAH    5000  /* nominal pack capacity, milliamp-hours */
 
+/* OCV-correction gating: pack current must stay within +/-this band, for at
+   least this long, before resting cell voltage is trusted to correct
+   Coulomb-counting drift (loaded voltage includes IR drop and isn't a valid
+   OCV sample). */
+#define BMS_OCV_REST_CURRENT_CA  5      /* 0.05A */
+#define BMS_OCV_REST_MS          30000  /* 30s continuous rest */
+
 /* Task periods, ms */
 #define TASK_PERIOD_SENSOR_MS   100
 #define TASK_PERIOD_SOC_MS      500

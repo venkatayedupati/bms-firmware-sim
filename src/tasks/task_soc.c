@@ -9,10 +9,12 @@ void task_soc_main(void *arg) {
     while (!osal_is_shutdown_requested()) {
         osal_mutex_lock(ctx->lock);
         cell_reading_t reading = ctx->latest_reading;
-        soc_estimator_update(&ctx->soc, reading.pack_current_ca, TASK_PERIOD_SOC_MS);
 
         uint16_t pack_mv = 0;
         for (int i = 0; i < BMS_CELL_COUNT; i++) pack_mv += reading.cell_mv[i];
+        uint16_t avg_cell_mv = pack_mv / BMS_CELL_COUNT;
+
+        soc_estimator_update(&ctx->soc, reading.pack_current_ca, TASK_PERIOD_SOC_MS, avg_cell_mv);
 
         ctx->status.pack_voltage_mv = pack_mv;
         ctx->status.pack_current_ca = reading.pack_current_ca;

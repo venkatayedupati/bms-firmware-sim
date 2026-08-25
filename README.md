@@ -15,15 +15,16 @@ handling, and hardware/software boundary design — not just "can write C."
 Three things distinguish it from a typical embedded portfolio project:
 
 1. **It's a real control problem, not a blinking LED.** Coulomb-counting SoC
-   estimation, a debounced/latching fault state machine, and a watchdog are
-   all things a real BMS does and a review board will ask about.
+   estimation with periodic OCV-based drift correction, a debounced/latching
+   fault state machine, and a watchdog are all things a real BMS does and a
+   review board will ask about.
 2. **It's built to be ported, not just to run once.** The OS calls (`osal/`)
    and CAN transport (`can/can_hal.h`) are both behind clean interfaces. The
    host build implements them with pthreads and an in-process virtual bus;
    swapping in FreeRTOS and SocketCAN/a real CAN peripheral touches only
    those two files, not the application logic. See
    [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#portability).
-3. **It's tested, not just demoed.** 37 unit tests cover the SoC math, every
+3. **It's tested, not just demoed.** 46 unit tests cover the SoC math, every
    fault-state transition (including the fault-latch-to-SHUTDOWN path), and
    CAN frame packing/unpacking — see [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md).
 
@@ -67,7 +68,7 @@ Requires only a C11 compiler and pthreads (works out of the box on macOS and
 Linux; no cmake, no package manager, no submodules).
 
 ```sh
-make test              # build and run all 37 unit tests
+make test              # build and run all 46 unit tests
 make run               # build and run the simulator, nominal scenario, 8s
 make run SCENARIO=overvoltage    # inject a fault scenario
 ```
@@ -101,7 +102,7 @@ src/
   bms/      Domain logic: cell model, SoC estimator, fault state machine
   tasks/    The 5 periodic tasks + their shared app_context_t
   main.c    Wiring and sim lifecycle
-test/       37 dependency-free unit tests (no external test framework)
+test/       46 dependency-free unit tests (no external test framework)
 docs/       Architecture, CAN protocol spec, test plan, interview notes
 ```
 
@@ -111,9 +112,9 @@ docs/       Architecture, CAN protocol spec, test plan, interview notes
   cross-compile for an STM32/ESP32 target with real ADC-driven cell sensing.
 - Replace SocketCAN's absence on macOS with a Linux/Docker dev path that
   exercises a real `vcan0` interface via `can_hal_socketcan.c`.
-- Replace Coulomb-counting drift with a periodic OCV-based SoC correction
-  (or a small Kalman filter) — see `docs/DESIGN.md` notes in
-  `docs/ARCHITECTURE.md`.
+- Replace the rest-triggered OCV correction (`src/bms/soc_estimator.c`) with
+  a small Kalman filter fusing voltage and current, which also works under
+  load instead of only at rest.
 - CAN-FD support and ISO 26262-style fault severity classification.
 
 See [`docs/INTERVIEW_NOTES.md`](docs/INTERVIEW_NOTES.md) for how to talk

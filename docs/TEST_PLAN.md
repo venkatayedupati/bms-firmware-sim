@@ -10,7 +10,7 @@ the simulator itself and observing correct behavior end to end, since
 timing-dependent concurrent behavior is a poor fit for deterministic unit
 assertions.
 
-37 tests, all passing, run with `make test`, no external framework or
+46 tests, all passing, run with `make test`, no external framework or
 network access required (`test/test.h` is a ~30-line macro shim).
 
 ## Coverage by module
@@ -25,7 +25,16 @@ network access required (`test/test.h` is a ~30-line macro shim).
   arithmetic has to be exactly right.
 - Clamps at 0% when over-discharged (never goes negative).
 - Clamps at 100% when over-charged (never overflows past full).
-- Zero current for any duration leaves SoC unchanged.
+- Zero current for any duration leaves the Coulomb-counted value itself
+  unchanged (separate from OCV correction, below).
+- The OCV lookup table (`soc_estimator_ocv_lookup_percent_x2`) is tested
+  directly: exact breakpoints, linear interpolation between them, and
+  clamping outside the table's voltage range.
+- Rest-triggered OCV correction: a deliberately drifted Coulomb count does
+  **not** correct on a rest shorter than `BMS_OCV_REST_MS`, corrects exactly
+  to the OCV-derived value once that full rest window elapses, and never
+  corrects at all while pack current stays outside the rest band — loaded
+  voltage isn't a valid OCV sample regardless of how long it's sustained.
 
 ### `fault_manager` (`test/test_fault_manager.c`)
 

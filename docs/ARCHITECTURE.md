@@ -133,8 +133,9 @@ payoff, which is why it's a direct, swappable module instead of a HAL.
 
 ## Future work (see also README "Roadmap")
 
-- Kalman-filter or OCV-corrected SoC estimation to bound Coulomb-counting
-  drift over long runs.
+- Kalman filter fusing voltage and current for SoC, superseding the current
+  rest-triggered OCV correction (see `src/bms/soc_estimator.c`) with
+  something that also works under load.
 - CAN-FD and larger pack sizes (this demo hardcodes a 4S pack for clarity).
 - ISO 26262-style fault severity/ASIL classification instead of a flat
   bitmask.
