@@ -4,8 +4,9 @@
 
 /* Piecewise-linear approximation of a typical Li-ion resting discharge
    curve: flatter through the middle, steeper near the empty/full ends. Only
-   valid as an OCV sample when the pack has been at rest long enough for
-   internal-resistance IR drop to settle out (see soc_estimator_update). */
+   a valid OCV sample at rest -- how much the filter trusts it under load is
+   handled by soc_estimator_update's measurement-noise model, not by this
+   table. */
 typedef struct {
     uint16_t mv;
     uint8_t percent_x2;
@@ -28,8 +29,8 @@ static const ocv_point_t OCV_TABLE[] = {
 
 void soc_estimator_init(soc_estimator_t *e, uint16_t capacity_mah) {
     e->capacity_mah = capacity_mah;
-    e->remaining_mah_x100 = (int32_t)capacity_mah * 100; /* start at 100% */
-    e->rest_accum_ms = 0;
+    e->x_percent = 100.0; /* start at 100% */
+    e->p_variance = BMS_SOC_INITIAL_VARIANCE_PCT2;
 }
 
 uint8_t soc_estimator_ocv_lookup_percent_x2(uint16_t avg_cell_mv) {
@@ -54,31 +55,49 @@ uint8_t soc_estimator_ocv_lookup_percent_x2(uint16_t avg_cell_mv) {
 
 void soc_estimator_update(soc_estimator_t *e, int16_t current_ca, uint32_t dt_ms,
                            uint16_t avg_cell_mv) {
-    /* delta_mAh_x100 = current_ca(0.01A) * 10(mA/0.01A) * dt_ms * 100 / 3600000
-                       = current_ca * dt_ms / 3600  */
-    int64_t delta = ((int64_t)current_ca * (int64_t)dt_ms) / 3600;
-    e->remaining_mah_x100 += (int32_t)delta;
+    /* --- Predict: Coulomb-count the current into a percent-of-capacity
+       delta (same arithmetic as plain Coulomb counting, just expressed in
+       percent instead of mAh: current_ca(0.01A) * dt_ms / (3600 * capacity_mah)
+       is amp-hours consumed divided by capacity, as a fraction). */
+    double delta_percent =
+        ((double)current_ca * (double)dt_ms) / (3600.0 * (double)e->capacity_mah);
+    double x_pred = e->x_percent + delta_percent;
 
-    int32_t cap_x100 = (int32_t)e->capacity_mah * 100;
-    if (e->remaining_mah_x100 > cap_x100) e->remaining_mah_x100 = cap_x100;
-    if (e->remaining_mah_x100 < 0) e->remaining_mah_x100 = 0;
+    /* Process noise: a larger integrated move carries proportionally more
+       accumulated current-sense error. A small floor keeps the filter able
+       to correct a stale estimate even across updates with zero current. */
+    double sense_error = BMS_SOC_CURRENT_SENSE_ERROR_FRAC * delta_percent;
+    double process_noise = BMS_SOC_PROCESS_NOISE_FLOOR_PCT2 + sense_error * sense_error;
+    double p_pred = e->p_variance + process_noise;
 
-    if (current_ca >= -BMS_OCV_REST_CURRENT_CA && current_ca <= BMS_OCV_REST_CURRENT_CA) {
-        e->rest_accum_ms += dt_ms;
-    } else {
-        e->rest_accum_ms = 0;
-    }
+    /* --- Update: fuse against this cycle's OCV measurement. Measurement
+       noise grows with current^2, since IR drop grows with current and its
+       contribution to voltage error grows with the square of that. */
+    double z_percent = (double)soc_estimator_ocv_lookup_percent_x2(avg_cell_mv) / 2.0;
+    double current_a = (double)current_ca / 100.0;
+    double measurement_noise =
+        BMS_SOC_OCV_BASE_VARIANCE_PCT2 + BMS_SOC_OCV_LOAD_COEFF_PCT2_PER_A2 * current_a * current_a;
 
-    if (e->rest_accum_ms >= BMS_OCV_REST_MS) {
-        uint8_t ocv_percent_x2 = soc_estimator_ocv_lookup_percent_x2(avg_cell_mv);
-        e->remaining_mah_x100 = ((int32_t)ocv_percent_x2 * (int32_t)e->capacity_mah) / 2;
-    }
+    double gain = p_pred / (p_pred + measurement_noise);
+    double x_new = x_pred + gain * (z_percent - x_pred);
+    double p_new = (1.0 - gain) * p_pred;
+
+    if (x_new < 0.0) x_new = 0.0;
+    if (x_new > 100.0) x_new = 100.0;
+
+    e->x_percent = x_new;
+    e->p_variance = p_new;
 }
 
 uint8_t soc_estimator_get_percent_x2(const soc_estimator_t *e) {
-    if (e->capacity_mah == 0) return 0;
-    int32_t percent_x2 = (e->remaining_mah_x100 * 2) / (int32_t)e->capacity_mah;
-    if (percent_x2 < 0) percent_x2 = 0;
-    if (percent_x2 > 200) percent_x2 = 200;
-    return (uint8_t)percent_x2;
+    double percent_x2 = e->x_percent * 2.0;
+    if (percent_x2 < 0.0) percent_x2 = 0.0;
+    if (percent_x2 > 200.0) percent_x2 = 200.0;
+    return (uint8_t)(percent_x2 + 0.5); /* round to the nearest 0.5% tick */
+}
+
+int32_t soc_estimator_get_variance_x1000(const soc_estimator_t *e) {
+    double v = e->p_variance * 1000.0;
+    if (v < 0.0) v = 0.0; /* covariance is mathematically non-negative; guard fp round-off */
+    return (int32_t)(v + 0.5);
 }

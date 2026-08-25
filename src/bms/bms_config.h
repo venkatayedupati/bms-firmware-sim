@@ -14,12 +14,16 @@
 
 #define BMS_PACK_CAPACITY_MAH    5000  /* nominal pack capacity, milliamp-hours */
 
-/* OCV-correction gating: pack current must stay within +/-this band, for at
-   least this long, before resting cell voltage is trusted to correct
-   Coulomb-counting drift (loaded voltage includes IR drop and isn't a valid
-   OCV sample). */
-#define BMS_OCV_REST_CURRENT_CA  5      /* 0.05A */
-#define BMS_OCV_REST_MS          30000  /* 30s continuous rest */
+/* SoC Kalman filter tuning. The filter fuses a Coulomb-counting prediction
+   with an OCV-lookup measurement every update; these constants shape how
+   much each is trusted rather than gating OCV on/off at a fixed rest
+   threshold (see src/bms/soc_estimator.c). All units are percent^2 (a
+   variance), so a filter state trusted to +/-X% has a variance of X*X. */
+#define BMS_SOC_INITIAL_VARIANCE_PCT2    1.0   /* (+/-1%) confidence in the initial 100% assumption */
+#define BMS_SOC_CURRENT_SENSE_ERROR_FRAC 0.05  /* fraction of each integrated move assumed uncertain */
+#define BMS_SOC_PROCESS_NOISE_FLOOR_PCT2 0.0004 /* (+/-0.02%) added every step so a stale estimate can still be corrected at rest */
+#define BMS_SOC_OCV_BASE_VARIANCE_PCT2   0.25  /* (+/-0.5%) OCV measurement noise at true rest */
+#define BMS_SOC_OCV_LOAD_COEFF_PCT2_PER_A2 100.0 /* how fast per-amp IR drop de-trusts the OCV reading under load */
 
 /* Task periods, ms */
 #define TASK_PERIOD_SENSOR_MS   100

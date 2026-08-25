@@ -10,31 +10,44 @@ the simulator itself and observing correct behavior end to end, since
 timing-dependent concurrent behavior is a poor fit for deterministic unit
 assertions.
 
-46 tests, all passing, run with `make test`, no external framework or
+53 tests, all passing, run with `make test`, no external framework or
 network access required (`test/test.h` is a ~30-line macro shim).
 
 ## Coverage by module
 
 ### `soc_estimator` (`test/test_soc_estimator.c`)
 
-- Starts at 100%.
+SoC is a scalar Kalman filter fusing a Coulomb-counting prediction with an
+OCV-lookup measurement every update (see `src/bms/soc_estimator.c`). Most
+tests below feed a voltage the OCV table reads as *exactly* the same
+percentage the Coulomb count predicts — making the residual exactly zero,
+so the fused result must equal both inputs exactly regardless of the
+Kalman gain. That's what keeps precise integer assertions meaningful for a
+filter whose whole point is blending two noisy signals.
+
+- Starts at 100%, with the configured initial variance.
 - A known discharge profile (2A for 1 simulated hour against a 5000mAh
-  pack) produces the exact expected 60% — this is the one place a unit
-  test asserts a precise numeric outcome rather than just a state
-  transition, because the whole point of Coulomb counting is that the
-  arithmetic has to be exactly right.
-- Clamps at 0% when over-discharged (never goes negative).
-- Clamps at 100% when over-charged (never overflows past full).
-- Zero current for any duration leaves the Coulomb-counted value itself
-  unchanged (separate from OCV correction, below).
+  pack), with agreeing OCV, produces the exact expected 60% — the
+  zero-residual property above, not a coincidence.
+- Clamps at 0%/100% when massively over-discharged/over-charged, even with
+  agreeing OCV, since the physical SoC can't leave that range regardless of
+  what the filter computes internally.
+- Idle current with agreeing OCV leaves SoC exactly unchanged.
 - The OCV lookup table (`soc_estimator_ocv_lookup_percent_x2`) is tested
   directly: exact breakpoints, linear interpolation between them, and
   clamping outside the table's voltage range.
-- Rest-triggered OCV correction: a deliberately drifted Coulomb count does
-  **not** correct on a rest shorter than `BMS_OCV_REST_MS`, corrects exactly
-  to the OCV-derived value once that full rest window elapses, and never
-  corrects at all while pack current stays outside the rest band — loaded
-  voltage isn't a valid OCV sample regardless of how long it's sustained.
+- The filter's actual behavior (`test_soc_estimator_kalman_suite`), with
+  numeric expectations verified by hand against the update equations:
+  - At rest, a large deliberate disagreement between the Coulomb count and
+    the OCV reading is corrected quickly and *converges monotonically*
+    over successive updates (checked via `soc_estimator_get_variance_x1000`
+    shrinking every step) — not snapped instantly, and not gated on a fixed
+    wait.
+  - Under sustained heavy load, an equally large disagreement barely moves
+    the estimate at all, and the filter's variance is identical to the
+    agreeing case — disagreement biases the point estimate a little, not
+    the filter's confidence in it, since measurement noise (not a
+    threshold) is what's suppressing trust in the voltage reading.
 
 ### `fault_manager` (`test/test_fault_manager.c`)
 
