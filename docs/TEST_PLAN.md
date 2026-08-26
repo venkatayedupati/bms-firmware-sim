@@ -97,6 +97,20 @@ satisfied by the already-well-tested modules or would force testing
 timing-dependent task code that's a poor fit for it, so the report is there
 for visibility, not as a pass/fail gate.
 
+**Another CI-only surprise, same root cause as `_POSIX_C_SOURCE` above:**
+Ubuntu 24.04's apt `lcov` package is 2.0-1, which has a real bug in
+`--list`'s function-coverage percentage column -- verified by dumping the
+raw `coverage.info`: the underlying `FNH`/`FNF` counts were already correct
+(e.g. 6 hit / 6 found) while `--list` rendered that same data as "900%".
+The CI workflow installs lcov 2.5 from its GitHub release tarball instead
+(matching the Homebrew version already used in local development), which
+needs its own non-core-Perl dependencies (`Capture::Tiny`, `DateTime`,
+`JSON`, `PerlIO::gzip`) pulled in via apt Debian packages rather than CPAN,
+since there's no network CPAN access assumed in CI. First fix attempt
+guessed a gcov/gcc version mismatch instead and made no difference --
+worth remembering that a plausible-sounding theory still needs to be
+checked against the raw data before treating it as the actual cause.
+
 ## Coverage by module
 
 ### `soc_estimator` (`test/test_soc_estimator.c`)

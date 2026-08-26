@@ -50,9 +50,26 @@ jobs:
       # data as "900%"). Installing 2.5 from source instead, matching the
       # Homebrew version already verified correct in local development.
       - name: Install lcov 2.5 from source (Ubuntu's apt lcov 2.0-1 has a known --list percentage bug)
+        # Copying bin/+lib/ and wrapping with `perl -I lib` instead of
+        # `make install`: the packaged install target also builds man pages
+        # via sphinx-build (not present on the runner, not needed here).
+        # These are lcov 2.x's actual (non-core-Perl) CPAN dependencies --
+        # apt has them prepackaged as Debian modules (confirmed via
+        # `apt-cache depends lcov`, since lcov's own release tarball
+        # doesn't declare them anywhere convenient to introspect).
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq \
+            libcapture-tiny-perl libdatetime-perl libtimedate-perl \
+            libjson-perl libperlio-gzip-perl
           curl -sL https://github.com/linux-test-project/lcov/releases/download/v2.5/lcov-2.5.tar.gz -o /tmp/lcov.tar.gz
           tar xzf /tmp/lcov.tar.gz -C /tmp
-          sudo make -C /tmp/lcov-2.5 install
+          sudo mkdir -p /usr/local/libexec/lcov
+          sudo cp -r /tmp/lcov-2.5/bin /tmp/lcov-2.5/lib /usr/local/libexec/lcov/
+          for f in lcov geninfo genhtml gendesc; do
+            printf '#!/bin/bash\nexec perl -I/usr/local/libexec/lcov/lib /usr/local/libexec/lcov/bin/%s "$@"\n' "$f" \
+              | sudo tee /usr/local/bin/$f > /dev/null
+            sudo chmod +x /usr/local/bin/$f
+          done
+          lcov --version
       - name: Run tests with coverage instrumentation and report
         run: make coverage
