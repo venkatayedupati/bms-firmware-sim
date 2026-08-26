@@ -25,7 +25,8 @@ void fault_manager_init(fault_manager_t *fm) {
 static uint16_t evaluate_hard_faults(const cell_reading_t *r, int *warning_out) {
     uint16_t faults = 0;
     int warning = 0;
-    uint16_t min_mv = r->cell_mv[0], max_mv = r->cell_mv[0];
+    uint16_t min_mv = r->cell_mv[0];
+    uint16_t max_mv = r->cell_mv[0];
     int16_t max_temp = r->cell_temp_c[0];
 
     for (int i = 0; i < BMS_CELL_COUNT; i++) {

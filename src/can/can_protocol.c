@@ -33,14 +33,14 @@ void can_protocol_pack_cell_voltages(const cell_voltages_t *cv, can_frame_t *out
     memset(out, 0, sizeof(*out));
     out->id = CAN_ID_CELL_VOLTAGES;
     out->dlc = 8;
-    for (int i = 0; i < 4; i++) {
+    for (size_t i = 0; i < 4; i++) {
         put_u16(&out->data[i * 2], cv->cell_mv[i]);
     }
 }
 
 int can_protocol_unpack_cell_voltages(const can_frame_t *in, cell_voltages_t *out) {
     if (in->id != CAN_ID_CELL_VOLTAGES || in->dlc < 8) return -1;
-    for (int i = 0; i < 4; i++) {
+    for (size_t i = 0; i < 4; i++) {
         out->cell_mv[i] = get_u16(&in->data[i * 2]);
     }
     return 0;

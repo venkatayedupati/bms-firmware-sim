@@ -34,6 +34,13 @@ void task_can_main(void *arg) {
         can_hal_send(&frame);
 
         cell_voltages_t cv;
+        /* cv.cell_mv is a fixed 4-slot wire-format array (see
+           docs/CAN_PROTOCOL.md); reading.cell_mv is BMS_CELL_COUNT-sized,
+           currently also 4 but the documented next step if the pack grows.
+           The "&& i < 4" bound is a real guard against overflowing cv on
+           that day, not dead code -- it's just redundant *today*, which is
+           exactly what the suppressed check is (correctly) noticing. */
+        // cppcheck-suppress knownConditionTrueFalse
         for (int i = 0; i < BMS_CELL_COUNT && i < 4; i++) cv.cell_mv[i] = reading.cell_mv[i];
         can_protocol_pack_cell_voltages(&cv, &frame);
         can_hal_send(&frame);

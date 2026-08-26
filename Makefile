@@ -35,7 +35,25 @@ SIM_SRCS := $(CORE_SRCS) src/main.c
 TEST_SRCS := $(CORE_SRCS) test/test_main.c test/test_soc_estimator.c \
 	test/test_fault_manager.c test/test_can_protocol.c
 
-.PHONY: all sim test clean run sanitize \
+# Static analysis: clang-tidy needs an LLVM install (macOS's system clang
+# doesn't ship it; Homebrew's is keg-only, hence CLANG_TIDY defaulting to the
+# full path rather than assuming it's on PATH). cppcheck's inline
+# `// cppcheck-suppress` comments are silently ignored without
+# --inline-suppr -- a common gotcha, not optional here.
+CLANG_TIDY ?= /opt/homebrew/opt/llvm/bin/clang-tidy
+CPPCHECK ?= cppcheck
+
+# Coverage needs real per-file .o compilation (unlike the single-command
+# builds above) so gcov's per-translation-unit .gcno files land somewhere
+# predictable. VPATH lets the pattern rule below find each source
+# regardless of which src/ subdirectory it actually lives in -- safe only
+# because every source file in this project has a unique basename.
+COVERAGE_BUILD_DIR := build-coverage
+COVERAGE_FLAGS := --coverage -O0
+COVERAGE_OBJS := $(addprefix $(COVERAGE_BUILD_DIR)/,$(notdir $(TEST_SRCS:.c=.o)))
+vpath %.c $(sort $(dir $(TEST_SRCS)))
+
+.PHONY: all sim test clean run sanitize tidy cppcheck-run coverage \
 	tsan-sim tsan-test tsan-run asan-sim asan-test
 
 all: sim test
@@ -100,5 +118,42 @@ asan-test: $(ASAN_BUILD_DIR)/bms_tests
 
 sanitize: tsan-run tsan-test asan-sim asan-test
 
+# --- Static analysis ---
+# Bug-finding checks only (bugprone/cert/clang-analyzer/performance/
+# portability/misc); most of readability-* too, minus a few checks that
+# fight this codebase's established conventions rather than finding
+# anything -- see .clang-tidy for the reasoning behind each suppression.
+tidy:
+	$(CLANG_TIDY) $(SIM_SRCS) -- -std=c11 -Isrc
+
+# --enable=style catches things like a dead variable initializer or an
+# always-true loop condition; --inline-suppr honors the
+# `// cppcheck-suppress` comments already in the source (without it they're
+# silently ignored, not an error -- easy to miss).
+cppcheck-run:
+	$(CPPCHECK) --enable=warning,performance,portability,style --std=c11 -Isrc \
+		--suppress=missingIncludeSystem --inline-suppr --error-exitcode=1 \
+		$(SIM_SRCS) test/*.c
+
+# --- Coverage ---
+$(COVERAGE_BUILD_DIR)/%.o: %.c | $(COVERAGE_BUILD_DIR)
+	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -c $< -o $@
+
+$(COVERAGE_BUILD_DIR):
+	mkdir -p $(COVERAGE_BUILD_DIR)
+
+$(COVERAGE_BUILD_DIR)/bms_tests: $(COVERAGE_OBJS)
+	$(CC) $(COVERAGE_FLAGS) $(COVERAGE_OBJS) -o $@ $(LDFLAGS)
+
+# Coverage of src/ only -- test/test.h's macro-shim "code" and the test
+# suites themselves aren't what this measures the coverage of.
+coverage: $(COVERAGE_BUILD_DIR)/bms_tests
+	./$(COVERAGE_BUILD_DIR)/bms_tests
+	lcov --capture --directory $(COVERAGE_BUILD_DIR) --output-file $(COVERAGE_BUILD_DIR)/coverage.info \
+		--rc branch_coverage=1 --quiet --ignore-errors unsupported
+	lcov --remove $(COVERAGE_BUILD_DIR)/coverage.info '*/test/*' \
+		--output-file $(COVERAGE_BUILD_DIR)/coverage.info --rc branch_coverage=1 --quiet
+	lcov --list $(COVERAGE_BUILD_DIR)/coverage.info --rc branch_coverage=1
+
 clean:
-	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR)

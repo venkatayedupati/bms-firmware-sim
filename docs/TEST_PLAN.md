@@ -47,6 +47,56 @@ what these tools detect. Sanitizers catch synchronization and memory-safety
 violations; they don't catch "this shared state's default value doesn't
 represent a real physical reading."
 
+## Static analysis
+
+`make tidy` (clang-tidy) and `make cppcheck-run` (cppcheck) both run in CI.
+Every suppressed check in `.clang-tidy` has a one-line reason attached, not
+a blanket disable — two are worth calling out specifically because they
+were only discovered by running the *actual* CI tool versions, not the
+locally-installed ones, echoing the same lesson as the `_POSIX_C_SOURCE`
+build fix below:
+
+- `clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling`
+  suggests replacing `memset`/`memcpy`/`strncpy` with C11 Annex K's `_s`
+  variants. Annex K is optional and neither glibc nor macOS's libc
+  implement it — the suggested fix doesn't exist on either platform this
+  project targets, so the check is suppressed rather than silently ignored.
+- Ubuntu's `clang-tidy` package (used in CI) is a different version from
+  whatever's installed locally, and can enable checks the other doesn't —
+  the check above only showed up when verified directly on Linux. Same
+  root cause as `osal_posix.c` needing `_POSIX_C_SOURCE` (see
+  `docs/ARCHITECTURE.md`): assuming a local dev machine's toolchain matches
+  CI's is exactly the kind of assumption that's cheap to verify and
+  expensive to discover from a red CI run.
+
+Two real (if minor) findings came out of this pass rather than being
+suppressed: a dead variable initializer in `osal_queue_send`/
+`osal_queue_receive` (`rc`'s initial value was always overwritten before
+being read), and an `int` array index in `can_protocol.c`'s cell-voltage
+pack/unpack widened implicitly to a pointer offset — harmless given the
+loop only ever runs 0..3, but `size_t` is the correct type for an array
+index regardless. One cppcheck finding was suppressed instead of fixed: a
+"condition is always true" in `task_can.c`'s cell-voltage loop bound
+(`i < BMS_CELL_COUNT && i < 4`) is correct *today* only because
+`BMS_CELL_COUNT` is 4; the redundant `&& i < 4` is a deliberate guard
+against the documented 5th-cell extension overflowing the CAN wire
+format's fixed 4-slot array, not dead code.
+
+## Code coverage
+
+`make coverage` (also run in CI) builds with `--coverage`, runs the test
+suite, and reports line/branch/function coverage via lcov, scoped to
+`src/` only (the test harness itself isn't what's being measured). The
+report is direct, numeric confirmation of the coverage philosophy stated
+above, not a separate claim: `soc_estimator.c` and `fault_manager.c` sit in
+the high-90s%, `can_protocol.c` at 100%, and every task/OSAL/cell-model file
+sits at 0% — because those are exercised by `make run`, not asserted on by
+unit tests, exactly as documented in "What's not unit tested" below. There's
+no enforced minimum-coverage gate: a hard threshold would either be trivially
+satisfied by the already-well-tested modules or would force testing
+timing-dependent task code that's a poor fit for it, so the report is there
+for visibility, not as a pass/fail gate.
+
 ## Coverage by module
 
 ### `soc_estimator` (`test/test_soc_estimator.c`)

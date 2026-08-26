@@ -13,7 +13,7 @@ handling, and hardware/software boundary design — not just "can write C."
 
 ## Why this project
 
-Four things distinguish it from a typical embedded portfolio project:
+Five things distinguish it from a typical embedded portfolio project:
 
 1. **It's a real control problem, not a blinking LED.** SoC isn't plain
    Coulomb counting — it's a 2-state Kalman filter tracking both SoC and
@@ -38,6 +38,11 @@ Four things distinguish it from a typical embedded portfolio project:
    UBSan (`make sanitize`) — not just for show: it caught a real, silent
    data race in the OSAL shutdown flag (`src/osal/osal_posix.c`), fixed with
    C11 atomics. See ["Sanitizers"](docs/TEST_PLAN.md#sanitizers).
+5. **It's linted for real, not just formatted.** CI also runs clang-tidy and
+   cppcheck (`make tidy`, `make cppcheck-run`) and measures test coverage
+   with lcov (`make coverage`) — every suppressed check in `.clang-tidy` has
+   a one-line reason (a false positive on this platform, or a check that
+   fights a deliberate convention), not a blanket disable.
 
 ## Architecture at a glance
 
@@ -79,10 +84,13 @@ Requires only a C11 compiler and pthreads (works out of the box on macOS and
 Linux; no cmake, no package manager, no submodules).
 
 ```sh
-make test      # build and run all 58 unit tests
-make run       # build and run the simulator, nominal scenario, 8s
+make test         # build and run all 58 unit tests
+make run          # build and run the simulator, nominal scenario, 8s
 make run SCENARIO=overvoltage   # inject a fault scenario
-make sanitize  # build + run the sim and tests under TSan, ASan, and UBSan
+make sanitize      # build + run the sim and tests under TSan, ASan, and UBSan
+make tidy          # clang-tidy (requires LLVM; see CLANG_TIDY in the Makefile)
+make cppcheck-run  # cppcheck
+make coverage      # build + run tests with coverage instrumentation, print report
 ```
 
 Available scenarios: `nominal`, `overvoltage`, `undervoltage`, `overtemp`,
@@ -125,5 +133,3 @@ docs/       Architecture, CAN protocol spec, test plan
 - Replace SocketCAN's absence on macOS with a Linux/Docker dev path that
   exercises a real `vcan0` interface via `can_hal_socketcan.c`.
 - CAN-FD support and ISO 26262-style fault severity classification.
-- Static analysis (clang-tidy/cppcheck, MISRA-C-adjacent rules) and code
-  coverage measurement in CI, alongside the sanitizers already running.

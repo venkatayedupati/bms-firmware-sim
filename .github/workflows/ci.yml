@@ -27,3 +27,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: ThreadSanitizer + AddressSanitizer/UBSan (sim + tests)
         run: make sanitize
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-tidy and cppcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-tidy cppcheck
+      - name: clang-tidy
+        run: make tidy CLANG_TIDY=clang-tidy
+      - name: cppcheck
+        run: make cppcheck-run
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lcov
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lcov
+      - name: Run tests with coverage instrumentation and report
+        run: make coverage

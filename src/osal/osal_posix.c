@@ -2,8 +2,10 @@
    extensions; glibc only declares them under strict -std=c11 if a feature
    test macro asks for them (must be defined before any system header is
    included). macOS's libc exposes them regardless, which is why this only
-   ever broke on Linux. */
-#define _POSIX_C_SOURCE 199309L
+   ever broke on Linux. _POSIX_C_SOURCE is a standard POSIX feature-test
+   macro user code is specifically meant to define -- not a genuine
+   reserved-identifier violation, hence the NOLINT. */
+#define _POSIX_C_SOURCE 199309L // NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
 
 #include "osal.h"
 
@@ -60,7 +62,7 @@ uint32_t osal_get_tick_ms(void) {
        into a huge positive number instead of a small negative one. */
     int64_t sec_diff = (int64_t)now.tv_sec - (int64_t)g_start_time.tv_sec;
     int64_t nsec_diff = (int64_t)now.tv_nsec - (int64_t)g_start_time.tv_nsec;
-    int64_t ms = sec_diff * 1000 + nsec_diff / 1000000;
+    int64_t ms = (sec_diff * 1000) + (nsec_diff / 1000000);
     return (uint32_t)ms;
 }
 
@@ -118,7 +120,7 @@ osal_queue_t *osal_queue_create(size_t item_size, size_t capacity) {
 static void abs_deadline(struct timespec *ts, uint32_t timeout_ms) {
     clock_gettime(CLOCK_REALTIME, ts);
     ts->tv_sec += timeout_ms / 1000;
-    long ns = ts->tv_nsec + (long)(timeout_ms % 1000) * 1000000L;
+    long ns = ts->tv_nsec + ((long)(timeout_ms % 1000) * 1000000L);
     ts->tv_sec += ns / 1000000000L;
     ts->tv_nsec = ns % 1000000000L;
 }
@@ -127,16 +129,15 @@ int osal_queue_send(osal_queue_t *q, const void *item, uint32_t timeout_ms) {
     pthread_mutex_lock(&q->lock);
     struct timespec deadline;
     abs_deadline(&deadline, timeout_ms);
-    int rc = 0;
     while (q->count == q->capacity) {
-        rc = pthread_cond_timedwait(&q->not_full, &q->lock, &deadline);
+        int rc = pthread_cond_timedwait(&q->not_full, &q->lock, &deadline);
         if (rc == ETIMEDOUT) {
             pthread_mutex_unlock(&q->lock);
             return 0; /* full, timed out */
         }
     }
     size_t tail = (q->head + q->count) % q->capacity;
-    memcpy(q->buf + tail * q->item_size, item, q->item_size);
+    memcpy(q->buf + (tail * q->item_size), item, q->item_size);
     q->count++;
     pthread_cond_signal(&q->not_empty);
     pthread_mutex_unlock(&q->lock);
@@ -147,15 +148,14 @@ int osal_queue_receive(osal_queue_t *q, void *item, uint32_t timeout_ms) {
     pthread_mutex_lock(&q->lock);
     struct timespec deadline;
     abs_deadline(&deadline, timeout_ms);
-    int rc = 0;
     while (q->count == 0) {
-        rc = pthread_cond_timedwait(&q->not_empty, &q->lock, &deadline);
+        int rc = pthread_cond_timedwait(&q->not_empty, &q->lock, &deadline);
         if (rc == ETIMEDOUT) {
             pthread_mutex_unlock(&q->lock);
             return 0; /* empty, timed out */
         }
     }
-    memcpy(item, q->buf + q->head * q->item_size, q->item_size);
+    memcpy(item, q->buf + (q->head * q->item_size), q->item_size);
     q->head = (q->head + 1) % q->capacity;
     q->count--;
     pthread_cond_signal(&q->not_full);

@@ -50,7 +50,7 @@ uint8_t soc_estimator_ocv_lookup_percent_x2(uint16_t avg_cell_mv) {
             int32_t hi_p = OCV_TABLE[i + 1].percent_x2;
             int32_t span_mv = (int32_t)hi_mv - (int32_t)lo_mv;
             int32_t offset_mv = (int32_t)avg_cell_mv - (int32_t)lo_mv;
-            return (uint8_t)(lo_p + ((hi_p - lo_p) * offset_mv) / span_mv);
+            return (uint8_t)(lo_p + (((hi_p - lo_p) * offset_mv) / span_mv));
         }
     }
     return 0; /* unreachable: table is exhaustive over uint16_t range via the clamps above */
@@ -77,8 +77,8 @@ void soc_estimator_update(soc_estimator_t *e, int16_t current_ca, uint32_t dt_ms
        hence the SoC delta, by k*db -- this is what couples the two states
        and lets a persistent residual teach the filter about bias instead of
        just being fought every cycle). */
-    double p00 = e->p00 - 2.0 * k * e->p01 + k * k * e->p11;
-    double p01 = e->p01 - k * e->p11;
+    double p00 = e->p00 - (2.0 * k * e->p01) + (k * k * e->p11);
+    double p01 = e->p01 - (k * e->p11);
     double p11 = e->p11;
 
     /* Process noise: a larger integrated move carries proportionally more
@@ -89,7 +89,7 @@ void soc_estimator_update(soc_estimator_t *e, int16_t current_ca, uint32_t dt_ms
        can vary a little with temperature/age even if it's never truly
        constant. */
     double sense_error = BMS_SOC_CURRENT_SENSE_ERROR_FRAC * delta_percent;
-    p00 += BMS_SOC_PROCESS_NOISE_FLOOR_PCT2 + sense_error * sense_error;
+    p00 += BMS_SOC_PROCESS_NOISE_FLOOR_PCT2 + (sense_error * sense_error);
     p11 += BMS_SOC_BIAS_RANDOM_WALK_CA2_PER_S * ((double)dt_ms / 1000.0);
 
     /* --- Update: fuse against this cycle's OCV measurement. The
@@ -99,21 +99,21 @@ void soc_estimator_update(soc_estimator_t *e, int16_t current_ca, uint32_t dt_ms
     double z_percent = (double)soc_estimator_ocv_lookup_percent_x2(avg_cell_mv) / 2.0;
     double current_a = (double)current_ca / 100.0;
     double measurement_noise =
-        BMS_SOC_OCV_BASE_VARIANCE_PCT2 + BMS_SOC_OCV_LOAD_COEFF_PCT2_PER_A2 * current_a * current_a;
+        BMS_SOC_OCV_BASE_VARIANCE_PCT2 + (BMS_SOC_OCV_LOAD_COEFF_PCT2_PER_A2 * current_a * current_a);
 
     double s = p00 + measurement_noise;
     double k_soc = p00 / s;  /* Kalman gain onto SoC */
     double k_bias = p01 / s; /* Kalman gain onto bias, via their coupling */
     double residual = z_percent - soc_pred;
 
-    double soc_new = soc_pred + k_soc * residual;
-    double bias_new = bias_pred + k_bias * residual;
+    double soc_new = soc_pred + (k_soc * residual);
+    double bias_new = bias_pred + (k_bias * residual);
 
     /* P_new = (I - K H) P_pred; this simplified form is exactly symmetric
        (p00 - k_soc*p01 == p01 - k_bias*p00, since both equal p00*p01/s). */
-    double p00_new = p00 - k_soc * p00;
-    double p01_new = p01 - k_soc * p01;
-    double p11_new = p11 - k_bias * p01;
+    double p00_new = p00 - (k_soc * p00);
+    double p01_new = p01 - (k_soc * p01);
+    double p11_new = p11 - (k_bias * p01);
 
     if (soc_new < 0.0) soc_new = 0.0;
     if (soc_new > 100.0) soc_new = 100.0;

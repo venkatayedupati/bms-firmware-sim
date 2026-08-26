@@ -113,6 +113,19 @@ to real FreeRTOS calls is direct:
 An `osal_freertos.c` implementing this table is the only new file a port
 needs; nothing in `tasks/`, `bms/`, or `can/` changes.
 
+**A real portability pitfall already hit within `osal_posix.c` itself:**
+`clock_gettime`/`CLOCK_MONOTONIC`/`CLOCK_REALTIME`/`nanosleep` are POSIX
+realtime extensions; glibc only declares them under strict `-std=c11` if a
+feature-test macro (`_POSIX_C_SOURCE`) is defined before any system header
+is included. macOS's libc exposes them regardless of the standard mode, so
+this compiled and ran fine on every local (macOS) dev machine while failing
+CI's `ubuntu-latest` job on every single commit, unnoticed, until CI status
+was actually checked. The fix is one line (`#define _POSIX_C_SOURCE 199309L`
+at the top of the file), but the lesson is the point: a host OSAL backend
+being "portable" across POSIX systems is a claim, not a given, and it's only
+verified by actually building on the other POSIX system, not by assuming
+one Unix-like libc behaves like another.
+
 ### CAN HAL → SocketCAN / real peripheral
 
 `src/can/can_hal.h` exposes `can_hal_init/send/subscribe/shutdown`. The host

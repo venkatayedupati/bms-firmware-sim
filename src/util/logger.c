@@ -27,6 +27,6 @@ void log_msg(log_level_t level, const char *task, const char *fmt, ...) {
     vprintf(fmt, args);
     va_end(args);
     printf("\n");
-    fflush(stdout);
+    (void)fflush(stdout); /* console logging; a flush failure here isn't actionable */
     pthread_mutex_unlock(&g_log_lock);
 }

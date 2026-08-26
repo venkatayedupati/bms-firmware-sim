@@ -1,6 +1,7 @@
 build/
 build-tsan/
 build-asan/
+build-coverage/
 *.o
 *.dSYM/
 .DS_Store

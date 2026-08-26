@@ -1,0 +1,49 @@
+# Enabled groups are the ones that find actual bugs (bugprone, clang-analyzer,
+# cert, performance, portability) or genuinely risky patterns (misc);
+# readability-* is enabled too but with two checks turned off because they
+# fight this codebase's established, deliberate conventions rather than
+# finding anything -- forcing them through would be a large stylistic diff
+# for zero correctness value, not a real fix.
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -misc-include-cleaner,
+  -readability-braces-around-statements,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-uppercase-literal-suffix
+# clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling:
+#   suggests replacing memset/memcpy/memmove/strncpy with C11 Annex K's
+#   "_s" variants (memset_s, etc). Annex K is optional and glibc has
+#   explicitly declined to implement it for years; macOS's libc doesn't
+#   have it either. The suggested fix doesn't exist on either platform
+#   this project actually targets, so applying it isn't possible, only
+#   suppressing the check is.
+# bugprone-easily-swappable-parameters: real concern in general (e.g.
+#   soc_estimator_update's current/dt/voltage args), but each flagged
+#   function here has exactly one or two simple, already-correct call
+#   sites -- fixing it would mean wrapping primitives in distinct types
+#   purely to satisfy the linter, not addressing a live risk.
+# misc-include-cleaner: wants every transitively-used symbol's exact header
+#   included directly, which fights the OSAL/CAN-HAL's whole point -- app
+#   code is meant to depend on osal.h, not know or care which system header
+#   defines uint32_t underneath it.
+# readability-braces-around-statements: this codebase consistently uses
+#   brace-less single-line guard clauses and clamps (if (x < 0) x = 0;) as a
+#   deliberate, established style throughout every module.
+# readability-magic-numbers / identifier-length / uppercase-literal-suffix:
+#   flag things like BMS_CELL_COUNT-sized loops, short pointer names (e, m,
+#   t, q) idiomatic for this embedded style, and voltage/current constants
+#   that are already named and documented in bms_config.h and the protocol
+#   docs -- not unnamed, unexplained magic numbers.
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/.*'
+FormatStyle: none
