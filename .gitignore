@@ -2,3 +2,4 @@ build/
 *.o
 *.dSYM/
 .DS_Store
+docs/INTERVIEW_NOTES.md

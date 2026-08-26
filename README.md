@@ -103,7 +103,7 @@ src/
   tasks/    The 5 periodic tasks + their shared app_context_t
   main.c    Wiring and sim lifecycle
 test/       53 dependency-free unit tests (no external test framework)
-docs/       Architecture, CAN protocol spec, test plan, interview notes
+docs/       Architecture, CAN protocol spec, test plan
 ```
 
 ## Roadmap / what a v2 would add
@@ -116,6 +116,3 @@ docs/       Architecture, CAN protocol spec, test plan, interview notes
   multi-state model (SoC + a current-sensor bias term), rather than a scalar
   filter with hand-tuned noise constants.
 - CAN-FD support and ISO 26262-style fault severity classification.
-
-See [`docs/INTERVIEW_NOTES.md`](docs/INTERVIEW_NOTES.md) for how to talk
-through the design decisions in an interview.
