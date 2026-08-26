@@ -57,6 +57,7 @@ int main(int argc, char **argv) {
            ctx.status.pack_voltage_mv, ctx.status.pack_current_ca,
            ctx.status.soc_percent_x2 / 2.0, ctx.status.state, ctx.fault_mgr.active_faults);
     osal_mutex_unlock(ctx.lock);
+    osal_mutex_destroy(ctx.lock);
 
     can_hal_shutdown();
     return 0;

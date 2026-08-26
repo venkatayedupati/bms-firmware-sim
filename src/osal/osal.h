@@ -40,6 +40,7 @@ int osal_queue_receive(osal_queue_t *q, void *item, uint32_t timeout_ms);
 osal_mutex_t *osal_mutex_create(void);
 void osal_mutex_lock(osal_mutex_t *m);
 void osal_mutex_unlock(osal_mutex_t *m);
+void osal_mutex_destroy(osal_mutex_t *m);
 
 /* Scheduler lifecycle */
 void osal_start_scheduler(void);   /* blocks until osal_request_shutdown() */

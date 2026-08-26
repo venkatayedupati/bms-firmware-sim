@@ -1,3 +1,10 @@
+/* clock_gettime/CLOCK_MONOTONIC/CLOCK_REALTIME/nanosleep are POSIX realtime
+   extensions; glibc only declares them under strict -std=c11 if a feature
+   test macro asks for them (must be defined before any system header is
+   included). macOS's libc exposes them regardless, which is why this only
+   ever broke on Linux. */
+#define _POSIX_C_SOURCE 199309L
+
 #include "osal.h"
 
 #include <pthread.h>
@@ -164,6 +171,12 @@ osal_mutex_t *osal_mutex_create(void) {
 
 void osal_mutex_lock(osal_mutex_t *m) { pthread_mutex_lock(&m->m); }
 void osal_mutex_unlock(osal_mutex_t *m) { pthread_mutex_unlock(&m->m); }
+
+void osal_mutex_destroy(osal_mutex_t *m) {
+    if (!m) return;
+    pthread_mutex_destroy(&m->m);
+    free(m);
+}
 
 void osal_start_scheduler(void) {
     /* Host tasks are already running as pthreads; just block the main

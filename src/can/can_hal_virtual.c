@@ -56,4 +56,6 @@ int can_hal_send(const can_frame_t *frame) {
 
 void can_hal_shutdown(void) {
     g_sub_count = 0;
+    osal_mutex_destroy(g_bus_lock);
+    g_bus_lock = NULL;
 }
