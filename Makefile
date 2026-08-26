@@ -136,6 +136,18 @@ cppcheck-run:
 		$(SIM_SRCS) test/*.c
 
 # --- Coverage ---
+# gcov must be the exact version paired with whatever compiled the .gcno
+# files, or lcov silently reports garbage (percentages over 100%, not an
+# error) instead of failing loudly. Hosted CI images commonly ship several
+# gcc versions side by side with a single generic `gcov` on PATH that can
+# mismatch the one `cc`/`gcc` resolves to; a single-toolchain dev machine or
+# container doesn't have this ambiguity, which is exactly why this can pass
+# clean locally and still be wrong in CI. Prefer the version-suffixed
+# binary matching $(CC)'s reported version; fall back to plain gcov where
+# that's all that exists (e.g. Xcode's toolchain).
+GCOV_TOOL := $(shell v=$$($(CC) -dumpversion 2>/dev/null | cut -d. -f1); \
+	if command -v gcov-$$v >/dev/null 2>&1; then echo gcov-$$v; else echo gcov; fi)
+
 $(COVERAGE_BUILD_DIR)/%.o: %.c | $(COVERAGE_BUILD_DIR)
 	$(CC) $(CFLAGS) $(COVERAGE_FLAGS) -c $< -o $@
 
@@ -150,7 +162,7 @@ $(COVERAGE_BUILD_DIR)/bms_tests: $(COVERAGE_OBJS)
 coverage: $(COVERAGE_BUILD_DIR)/bms_tests
 	./$(COVERAGE_BUILD_DIR)/bms_tests
 	lcov --capture --directory $(COVERAGE_BUILD_DIR) --output-file $(COVERAGE_BUILD_DIR)/coverage.info \
-		--rc branch_coverage=1 --quiet --ignore-errors unsupported
+		--rc branch_coverage=1 --quiet --ignore-errors unsupported --gcov-tool "$(GCOV_TOOL)"
 	lcov --remove $(COVERAGE_BUILD_DIR)/coverage.info '*/test/*' \
 		--output-file $(COVERAGE_BUILD_DIR)/coverage.info --rc branch_coverage=1 --quiet
 	lcov --list $(COVERAGE_BUILD_DIR)/coverage.info --rc branch_coverage=1

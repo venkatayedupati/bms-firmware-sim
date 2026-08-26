@@ -45,5 +45,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install lcov
         run: sudo apt-get update -qq && sudo apt-get install -y -qq lcov
+      - name: gcc/gcov toolchain versions (debugging aid if coverage numbers ever look wrong)
+        run: cc -dumpversion; gcov --version | head -1; ls /usr/bin/gcov* 2>/dev/null || true
       - name: Run tests with coverage instrumentation and report
         run: make coverage
