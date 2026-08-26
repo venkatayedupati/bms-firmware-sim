@@ -100,18 +100,56 @@ the difference between "I wrote some C" and "I designed firmware."
 ### OSAL → FreeRTOS
 
 `src/osal/osal.h` is the entire interface the application uses. The mapping
-to real FreeRTOS calls is direct:
+to real FreeRTOS calls, implemented in `src/osal/osal_freertos.c`:
 
 | OSAL call              | FreeRTOS equivalent                          |
 |-------------------------|-----------------------------------------------|
-| `osal_task_create`      | `xTaskCreate`                                  |
+| `osal_task_create`      | `xTaskCreate` (+ a trampoline giving a binary semaphore and calling `vTaskDelete(NULL)` on return, standing in for `pthread_join`) |
 | `osal_task_delay_ms`    | `vTaskDelay(pdMS_TO_TICKS(ms))`               |
 | `osal_get_tick_ms`      | `xTaskGetTickCount() * portTICK_PERIOD_MS`    |
 | `osal_queue_create/send/receive` | `xQueueCreate` / `xQueueSend` / `xQueueReceive` |
 | `osal_mutex_create/lock/unlock`  | `xSemaphoreCreateMutex` / `xSemaphoreTake` / `xSemaphoreGive` |
 
-An `osal_freertos.c` implementing this table is the only new file a port
-needs; nothing in `tasks/`, `bms/`, or `can/` changes.
+`osal_freertos.c` is the only new file `tasks/`, `bms/`, and `can/` needed
+to run on a real FreeRTOS kernel — genuinely verified, not just claimed:
+`make freertos-build` cross-compiles this project's actual application
+code (including `can_hal_virtual.c`, which turned out to have no POSIX
+dependency at all — only `<string.h>`/`<stdlib.h>` — so it's reused as-is
+rather than needing a real CAN peripheral driver) against a vendored real
+FreeRTOS kernel (`third_party/FreeRTOS-Kernel`, a git submodule) for an
+emulated Cortex-M3, and `make freertos-run` boots it under QEMU's
+`mps2-an385` machine. Injecting `SCENARIO_OVERVOLTAGE` there produces the
+exact same `state change -> 2 (active_faults=0x0009)` at the same
+millisecond the host build produces for that scenario — the fault state
+machine, the mutex-shared `app_context`, and the logger all genuinely run
+correctly on a real RTOS kernel, not just compile against its headers. See
+`targets/qemu_mps2_an385/` for the board support code (linker script,
+startup/vector table, a polling UART driver, and the FreeRTOSConfig.h);
+none of it lives under `src/`, since it exists only because this is a
+different hardware target, not because the application changed.
+
+This also surfaced a genuine, if narrow, portability bug: `logger.c`
+formatted `osal_get_tick_ms()`'s `uint32_t` with a bare `%u`, which happens
+to match on the host build's ABI (`uint32_t` is `unsigned int` there) but
+not on this embedded target's (`unsigned long`) — fixed with `<inttypes.h>`'s
+`PRIu32` instead of hardcoding a width. `logger.c` also used a raw
+`pthread_mutex_t` directly, bypassing the OSAL entirely; fixed by adding
+explicit `logger_init()`/`logger_shutdown()` calls (matching how every
+other subsystem here is started) instead of a lazily-created mutex, which
+would have raced.
+
+**Homebrew's `arm-none-eabi-gcc` formula can't build this.** It's
+configured `--without-headers` — a bare cross-compiler with no bundled
+libc at all, confirmed directly (`-print-file-name=nano.specs` doesn't
+resolve to a real file). The official ARM GNU Toolchain
+(`brew install --cask gcc-arm-embedded`, or the tarball CI downloads
+directly from `gitlab.arm.com`) bundles real newlib, including
+newlib-nano's `nano.specs`/`nosys.specs`. `targets/qemu_mps2_an385/Makefile`
+retargets newlib's `_write()` to a minimal polling UART driver
+(`targets/qemu_mps2_an385/uart.c`, register layout from FreeRTOS's own
+official QEMU MPS2 demo), so `printf`/`logger.c` work completely
+unmodified — the same "don't touch anything outside the port layer"
+property the OSAL itself is designed around.
 
 **A real portability pitfall already hit within `osal_posix.c` itself:**
 `clock_gettime`/`CLOCK_MONOTONIC`/`CLOCK_REALTIME`/`nanosleep` are POSIX

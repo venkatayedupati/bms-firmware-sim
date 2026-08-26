@@ -61,6 +61,7 @@ SOCKETCAN_BUILD_DIR := build-socketcan
 SOCKETCAN_SIM_SRCS := $(filter-out src/can/can_hal_virtual.c,$(SIM_SRCS)) src/can/can_hal_socketcan.c
 
 .PHONY: all sim test clean run sanitize tidy cppcheck-run coverage sim-socketcan run-socketcan \
+	freertos-build freertos-run freertos-clean \
 	tsan-sim tsan-test tsan-run asan-sim asan-test
 
 all: sim test
@@ -187,6 +188,20 @@ run-socketcan: sim-socketcan
 
 $(SOCKETCAN_BUILD_DIR):
 	mkdir -p $(SOCKETCAN_BUILD_DIR)
+
+# --- FreeRTOS port (QEMU mps2-an385, Cortex-M3) ---
+# Needs the full ARM GNU Toolchain (bundles newlib) and qemu-system-arm --
+# see targets/qemu_mps2_an385/Makefile and docs/ARCHITECTURE.md
+# "Portability" for exactly why Homebrew's arm-none-eabi-gcc formula alone
+# can't build this.
+freertos-build:
+	$(MAKE) -C targets/qemu_mps2_an385
+
+freertos-run:
+	$(MAKE) -C targets/qemu_mps2_an385 qemu
+
+freertos-clean:
+	$(MAKE) -C targets/qemu_mps2_an385 clean
 
 clean:
 	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR) $(SOCKETCAN_BUILD_DIR)

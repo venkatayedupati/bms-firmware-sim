@@ -23,19 +23,23 @@ Five things distinguish it from a typical embedded portfolio project:
    parts of a real BMS a review board will actually ask about. See
    ["Why coulomb counting instead of something fancier?"](docs/INTERVIEW_NOTES.md)
    for the design rationale.
-2. **It's built to be ported, and one port is already real code, not just a
-   plan.** The OS calls (`osal/`) and CAN transport (`can/can_hal.h`) are
-   both behind clean interfaces. The default host build implements them
-   with pthreads and an in-process virtual bus; `can_hal_socketcan.c` is a
-   second backend binding to a real Linux kernel `vcan0`/`can0` interface
-   (`make sim-socketcan`), verified in CI to compile and link cleanly
-   against real Linux CAN headers. Proving it sends/receives real frames
-   needs a genuine `vcan0`, which — verified directly — neither Docker
-   Desktop nor GitHub's hosted Linux runner can provide; see
+2. **It's built to be ported, and both ports are real code, not a plan —
+   one of them fully proven.** The OS calls (`osal/`) and CAN transport
+   (`can/can_hal.h`) are both behind clean interfaces. The default host
+   build implements them with pthreads and an in-process virtual bus.
+   `osal_freertos.c` swaps in a real FreeRTOS kernel (vendored as a git
+   submodule): `make freertos-run` cross-compiles this project's actual
+   task/domain code and boots it under QEMU's `mps2-an385` (Cortex-M3)
+   emulation, where it produces the exact same fault-detection output, to
+   the millisecond, as the host build — genuinely verified, not just
+   compiled. `can_hal_socketcan.c` binds to a real Linux kernel `vcan0`/
+   `can0` interface instead of the virtual bus (`make sim-socketcan`);
+   CI verifies it compiles and links cleanly against real Linux CAN
+   headers, but proving it sends/receives real frames needs a genuine
+   `vcan0`, which — verified directly — neither Docker Desktop nor
+   GitHub's hosted Linux runner can provide. See
    [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#portability) for exactly
-   what was checked and how to verify it yourself on a real Linux box.
-   FreeRTOS is the same story, one port away: only `osal/` would need a
-   new file.
+   what was checked on each.
 3. **It's tested, not just demoed.** 58 unit tests cover the SoC math, every
    fault-state transition (including the fault-latch-to-SHUTDOWN path), and
    CAN frame packing/unpacking — see [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md).
@@ -77,8 +81,8 @@ Five things distinguish it from a typical embedded portfolio project:
           │                                    │
           ▼                                    ▼
    osal/ (OS abstraction: tasks, queues, mutexes, tick)
-   → osal_posix.c (pthreads, used today)
-   → osal_freertos.c (documented port target, not yet written)
+   → osal_posix.c (pthreads, used by the default host build)
+   → osal_freertos.c (real FreeRTOS kernel, boots under QEMU -- see below)
 ```
 
 Full design rationale, the fault state machine diagram, and the portability
@@ -87,8 +91,9 @@ layout (DBC-equivalent) is in [`docs/CAN_PROTOCOL.md`](docs/CAN_PROTOCOL.md).
 
 ## Build & run
 
-Requires only a C11 compiler and pthreads (works out of the box on macOS and
-Linux; no cmake, no package manager, no submodules).
+The default host build requires only a C11 compiler and pthreads (works out
+of the box on macOS and Linux; no cmake, no package manager, no
+submodules).
 
 ```sh
 make test         # build and run all 58 unit tests
@@ -100,6 +105,18 @@ make cppcheck-run  # cppcheck
 make coverage      # build + run tests with coverage instrumentation, print report
 make sim-socketcan # Linux only: build against real vcan0/can0 instead of the virtual bus
 make run-socketcan # ...and run it (needs a real vcan0/can0 already set up)
+```
+
+The FreeRTOS port needs the vendored kernel submodule, the real ARM GNU
+Toolchain (`brew install --cask gcc-arm-embedded`; Homebrew's plain
+`arm-none-eabi-gcc` formula is header-less and can't build this — see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#portability)), and
+`qemu-system-arm`:
+
+```sh
+git submodule update --init
+make freertos-build   # cross-compile for QEMU's mps2-an385 (Cortex-M3)
+make freertos-run     # ...and boot it under QEMU (Ctrl-A X to quit)
 ```
 
 Available scenarios: `nominal`, `overvoltage`, `undervoltage`, `overtemp`,
@@ -126,17 +143,23 @@ the cell imbalance that overvoltage on one cell necessarily causes (bit 3).
 
 ```
 src/
-  osal/     OS abstraction layer (tasks, queues, mutexes) — pthread impl today
+  osal/     OS abstraction layer (tasks, queues, mutexes) — pthread + real FreeRTOS backends
   can/      CAN HAL (virtual bus + real SocketCAN backend) + protocol pack/unpack
   bms/      Domain logic: cell model, SoC Kalman filter, fault state machine
   tasks/    The 5 periodic tasks + their shared app_context_t
   main.c    Wiring and sim lifecycle
+targets/
+  qemu_mps2_an385/  Board support (linker script, startup, UART) for the FreeRTOS/QEMU port
+third_party/
+  FreeRTOS-Kernel/  Vendored FreeRTOS kernel (git submodule)
 test/       58 dependency-free unit tests (no external test framework)
 docs/       Architecture, CAN protocol spec, test plan
 ```
 
 ## Roadmap / what a v2 would add
 
-- Replace the pthread OSAL backend with real FreeRTOS (`osal_freertos.c`) and
-  cross-compile for an STM32/ESP32 target with real ADC-driven cell sensing.
+- Real ADC-driven cell sensing on physical STM32/ESP32 hardware — the
+  FreeRTOS port to QEMU is done and verified; this is specifically the
+  "on real silicon, with a real AFE" step beyond that, which needs
+  physical hardware this project doesn't have access to.
 - CAN-FD support and ISO 26262-style fault severity classification.

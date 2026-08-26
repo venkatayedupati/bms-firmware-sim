@@ -29,6 +29,7 @@ int main(int argc, char **argv) {
     printf("=== BMS Firmware Simulator ===\n");
     printf("scenario: %s | duration: %dms\n\n", scenario_name, SIM_DURATION_MS);
 
+    logger_init();
     can_hal_init();
 
     app_context_t ctx;
@@ -60,5 +61,6 @@ int main(int argc, char **argv) {
     osal_mutex_destroy(ctx.lock);
 
     can_hal_shutdown();
+    logger_shutdown();
     return 0;
 }

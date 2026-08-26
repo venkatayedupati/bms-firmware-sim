@@ -8,6 +8,11 @@ typedef enum {
     LOG_ERROR,
 } log_level_t;
 
+/* Call once at startup, before any task that might log is created, and
+   once at shutdown after every such task has exited. */
+void logger_init(void);
+void logger_shutdown(void);
+
 /* Thread-safe, timestamped (ms since sim start) console logging. */
 void log_msg(log_level_t level, const char *task, const char *fmt, ...);
 

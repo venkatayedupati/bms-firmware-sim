@@ -3,6 +3,7 @@ build-tsan/
 build-asan/
 build-coverage/
 build-socketcan/
+targets/qemu_mps2_an385/build/
 *.o
 *.dSYM/
 .DS_Store

@@ -100,3 +100,40 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the SocketCAN-backed simulator (compiles + links against real Linux CAN headers)
         run: make sim-socketcan
+
+  freertos-qemu:
+    # Unlike vcan0, QEMU's system emulation needs no special host kernel
+    # module -- it's a userspace program -- so this job verifies actual
+    # behavior, not just compilation: it boots the real cross-compiled ELF
+    # under QEMU's mps2-an385 (Cortex-M3) machine and confirms the same
+    # task startup sequence the host build produces, running on a real
+    # FreeRTOS kernel (vendored at third_party/FreeRTOS-Kernel) instead of
+    # pthreads. See src/osal/osal_freertos.c and docs/ARCHITECTURE.md
+    # "Portability".
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install qemu-system-arm
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-arm
+      # Most distro/Homebrew arm-none-eabi-gcc packages are bare compilers
+      # with no bundled libc (confirmed directly: Homebrew's is built
+      # --without-headers); this is the official ARM release, which
+      # bundles newlib including newlib-nano's nano/nosys specs.
+      - name: Install the ARM GNU Toolchain (bundles newlib)
+        run: |
+          curl -sL "https://gitlab.arm.com/api/v4/projects/tooling%2Fgnu-toolchains-for-arm/packages/generic/gnu-toolchain/15.3.rel1/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi.tar.xz" -o /tmp/toolchain.tar.xz
+          mkdir -p /tmp/arm-toolchain
+          tar xJf /tmp/toolchain.tar.xz -C /tmp/arm-toolchain --strip-components=1
+          echo "/tmp/arm-toolchain/bin" >> "$GITHUB_PATH"
+      - name: Build for QEMU mps2-an385
+        run: make freertos-build
+      - name: Boot under QEMU and verify the real FreeRTOS kernel runs this project's actual tasks
+        run: |
+          timeout 5 qemu-system-arm -M mps2-an385 -nographic \
+            -kernel targets/qemu_mps2_an385/build/bms_sim.elf > /tmp/qemu.log 2>&1 || true
+          cat /tmp/qemu.log
+          for t in sensor soc fault can watchdog; do
+            grep -q "$t .*task started" /tmp/qemu.log
+          done
