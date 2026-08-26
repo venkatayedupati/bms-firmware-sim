@@ -43,12 +43,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install lcov
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq lcov
-      - name: gcc/gcov/lcov toolchain versions (debugging aid if coverage numbers ever look wrong)
-        run: cc -dumpversion; gcov --version | head -1; lcov --version; ls /usr/bin/gcov* 2>/dev/null || true
+      # Ubuntu 24.04's apt package is lcov 2.0-1, which has a real rendering
+      # bug in `lcov --list`'s function-coverage percentage column (verified
+      # directly: the underlying .info data's FNH/FNF counts were already
+      # correct -- e.g. 6 hit / 6 found -- while --list rendered that same
+      # data as "900%"). Installing 2.5 from source instead, matching the
+      # Homebrew version already verified correct in local development.
+      - name: Install lcov 2.5 from source (Ubuntu's apt lcov 2.0-1 has a known --list percentage bug)
+        run: |
+          curl -sL https://github.com/linux-test-project/lcov/releases/download/v2.5/lcov-2.5.tar.gz -o /tmp/lcov.tar.gz
+          tar xzf /tmp/lcov.tar.gz -C /tmp
+          sudo make -C /tmp/lcov-2.5 install
       - name: Run tests with coverage instrumentation and report
         run: make coverage
-      - name: Dump raw coverage.info for fault_manager.c (diagnosing bogus percentages)
-        if: always()
-        run: awk '/SF:.*fault_manager/,/end_of_record/' build-coverage/coverage.info | head -60
