@@ -23,15 +23,19 @@ Five things distinguish it from a typical embedded portfolio project:
    parts of a real BMS a review board will actually ask about. See
    ["Why coulomb counting instead of something fancier?"](docs/INTERVIEW_NOTES.md)
    for the design rationale.
-2. **It's built to be ported, and one port is already real, not aspirational.**
-   The OS calls (`osal/`) and CAN transport (`can/can_hal.h`) are both behind
-   clean interfaces. The default host build implements them with pthreads
-   and an in-process virtual bus; `can_hal_socketcan.c` is a second, real
-   backend binding to an actual Linux kernel `vcan0`/`can0` interface
-   (`make sim-socketcan`), with CI creating a genuine `vcan0` and confirming
-   real frames traverse it — not just that the code compiles. FreeRTOS is
-   the same story, one port away: only `osal/` would need a new file. See
-   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#portability).
+2. **It's built to be ported, and one port is already real code, not just a
+   plan.** The OS calls (`osal/`) and CAN transport (`can/can_hal.h`) are
+   both behind clean interfaces. The default host build implements them
+   with pthreads and an in-process virtual bus; `can_hal_socketcan.c` is a
+   second backend binding to a real Linux kernel `vcan0`/`can0` interface
+   (`make sim-socketcan`), verified in CI to compile and link cleanly
+   against real Linux CAN headers. Proving it sends/receives real frames
+   needs a genuine `vcan0`, which — verified directly — neither Docker
+   Desktop nor GitHub's hosted Linux runner can provide; see
+   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#portability) for exactly
+   what was checked and how to verify it yourself on a real Linux box.
+   FreeRTOS is the same story, one port away: only `osal/` would need a
+   new file.
 3. **It's tested, not just demoed.** 58 unit tests cover the SoC math, every
    fault-state transition (including the fault-latch-to-SHUTDOWN path), and
    CAN frame packing/unpacking — see [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md).
@@ -95,6 +99,7 @@ make tidy          # clang-tidy (requires LLVM; see CLANG_TIDY in the Makefile)
 make cppcheck-run  # cppcheck
 make coverage      # build + run tests with coverage instrumentation, print report
 make sim-socketcan # Linux only: build against real vcan0/can0 instead of the virtual bus
+make run-socketcan # ...and run it (needs a real vcan0/can0 already set up)
 ```
 
 Available scenarios: `nominal`, `overvoltage`, `undervoltage`, `overtemp`,

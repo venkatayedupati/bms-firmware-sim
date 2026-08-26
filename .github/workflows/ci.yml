@@ -84,38 +84,19 @@ jobs:
       - name: Run tests with coverage instrumentation and report
         run: make coverage
 
-  socketcan:
-    # Real Linux only: creates an actual vcan0 kernel interface and sends
-    # traffic over it via can_hal_socketcan.c, not the in-process virtual
-    # bus can_hal_virtual.c backs the default build with. This does NOT
-    # work in Docker Desktop on macOS -- verified directly: its Linux VM
-    # kernel doesn't include the vcan module at all (`modprobe vcan` fails
-    # with "Module vcan not found"), so there's no local dev path for this
-    # on a Mac short of a full Linux VM. GitHub's hosted ubuntu-latest
-    # runner is a real, complete Linux kernel, so this job is the actual
-    # verification that the SocketCAN backend works against a real kernel
-    # networking stack, not just that it compiles.
+  socketcan-build:
+    # Compile/link verification only. Live functional testing against a
+    # real vcan0 needs a genuine Linux machine or full VM -- verified
+    # directly that neither Docker Desktop nor GitHub's hosted Linux
+    # runner can provide one: Docker Desktop's kernel lacks the vcan
+    # module outright (`modprobe vcan`: "Module vcan not found"), and
+    # GitHub's hosted runner's kernel lacks it too, in a way that isn't
+    # even a loadable-module gap -- `ip link add dev vcan0 type vcan`
+    # itself fails there with "Unknown device type". See
+    # docs/ARCHITECTURE.md "Portability" for how to test this yourself
+    # against a real vcan0 if you have an environment that has one.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up a real vcan0 interface
-        run: |
-          sudo modprobe vcan || echo "modprobe vcan failed (module not found?) -- trying ip link anyway in case vcan is built into this kernel directly"
-          uname -r
-          sudo ip link add dev vcan0 type vcan
-          sudo ip link set up vcan0
-      - name: Install can-utils (candump, to verify real frames on the bus)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq can-utils
-      - name: Build the SocketCAN-backed simulator
+      - name: Build the SocketCAN-backed simulator (compiles + links against real Linux CAN headers)
         run: make sim-socketcan
-      - name: Run against real vcan0 and verify actual frames appear on the bus
-        run: |
-          candump vcan0 -n 5 > /tmp/candump.log &
-          DUMP_PID=$!
-          BMS_CAN_IFACE=vcan0 ./build-socketcan/bms_sim &
-          SIM_PID=$!
-          wait $DUMP_PID
-          kill $SIM_PID 2>/dev/null || true
-          cat /tmp/candump.log
-          test -s /tmp/candump.log
-          grep -qE '\b100\b' /tmp/candump.log  # BMS_STATUS frame ID (0x100)

@@ -148,16 +148,39 @@ fan-out (matching the virtual bus's contract) is done in a background
 reader thread that dispatches each received frame to every registered
 callback, mirroring the virtual bus's own broadcast semantics.
 
-**There is no macOS/Docker Desktop dev path for this, and that's a real
-platform limitation, not a documentation gap:** Docker Desktop's Linux VM
-kernel doesn't include the `vcan` module at all (`modprobe vcan` fails with
-"Module vcan not found in directory ..."), verified directly, including
-with `--privileged --cap-add=NET_ADMIN`. There's no vcan0 to bind to inside
-a container on a Mac short of running a full, non-minimal Linux VM. CI's
-`socketcan` job is the actual verification that this backend works against
-a real kernel networking stack — it creates a genuine `vcan0` on GitHub's
-hosted Linux runner and confirms real frames traverse it, not just that the
-code compiles.
+**There is no fully-automatic environment that can prove this works against
+a real vcan0, and that's a real platform limitation, not a documentation
+gap.** Verified directly on both places this could plausibly run:
+
+- Docker Desktop's Linux VM kernel doesn't include the `vcan` module at
+  all (`modprobe vcan` fails with "Module vcan not found in directory
+  ..."), including with `--privileged --cap-add=NET_ADMIN`.
+- GitHub's hosted `ubuntu-latest` runner's kernel doesn't have it either
+  — and not as a loadable-module gap `modprobe` could route around:
+  `ip link add dev vcan0 type vcan` itself fails there with "Error:
+  Unknown device type," meaning the driver isn't built into that kernel
+  in any form.
+
+So CI's `socketcan-build` job only proves `can_hal_socketcan.c` compiles
+and links cleanly against real Linux CAN headers (`linux/can.h`,
+`linux/can/raw.h`) — genuinely useful (it's real API usage, not a stub),
+but not the same claim as "sends and receives real frames." Proving that
+needs an environment this project doesn't control: a real Linux machine,
+or a full (non-minimal) Linux VM — a cloud instance, UTM, or similar. If
+you have one, this is how to verify it directly:
+
+```sh
+sudo modprobe vcan            # or confirm it's already built in
+sudo ip link add dev vcan0 type vcan
+sudo ip link set up vcan0
+
+sudo apt install can-utils    # for candump
+candump vcan0 &                                # in one terminal
+BMS_CAN_IFACE=vcan0 make run-socketcan          # in another (or: ./build-socketcan/bms_sim)
+```
+
+You should see real `BMS_STATUS` (`100#...`) and `CELL_VOLTAGES`
+(`101#...`) frames appear in `candump`'s output every 100ms.
 
 ### What's intentionally *not* abstracted
 

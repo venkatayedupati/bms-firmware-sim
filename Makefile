@@ -60,7 +60,7 @@ vpath %.c $(sort $(dir $(TEST_SRCS)))
 SOCKETCAN_BUILD_DIR := build-socketcan
 SOCKETCAN_SIM_SRCS := $(filter-out src/can/can_hal_virtual.c,$(SIM_SRCS)) src/can/can_hal_socketcan.c
 
-.PHONY: all sim test clean run sanitize tidy cppcheck-run coverage sim-socketcan \
+.PHONY: all sim test clean run sanitize tidy cppcheck-run coverage sim-socketcan run-socketcan \
 	tsan-sim tsan-test tsan-run asan-sim asan-test
 
 all: sim test
@@ -179,6 +179,11 @@ sim-socketcan: $(SOCKETCAN_BUILD_DIR)/bms_sim
 
 $(SOCKETCAN_BUILD_DIR)/bms_sim: $(SOCKETCAN_SIM_SRCS) | $(SOCKETCAN_BUILD_DIR)
 	$(CC) $(CFLAGS) $(SOCKETCAN_SIM_SRCS) -o $@ $(LDFLAGS)
+
+# Needs a real vcan0/can0 already set up (see docs/ARCHITECTURE.md
+# "Portability"); BMS_CAN_IFACE picks the interface, default vcan0.
+run-socketcan: sim-socketcan
+	./$(SOCKETCAN_BUILD_DIR)/bms_sim
 
 $(SOCKETCAN_BUILD_DIR):
 	mkdir -p $(SOCKETCAN_BUILD_DIR)
