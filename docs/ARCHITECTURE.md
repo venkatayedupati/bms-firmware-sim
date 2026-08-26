@@ -128,13 +128,36 @@ one Unix-like libc behaves like another.
 
 ### CAN HAL → SocketCAN / real peripheral
 
-`src/can/can_hal.h` exposes `can_hal_init/send/subscribe/shutdown`. The host
-build's `can_hal_virtual.c` is an in-process broadcast bus (see its header
-comment for exactly what it does and doesn't model about real arbitration).
-A Linux target implements the same four functions against a `PF_CAN` /
-`SOCK_RAW` socket on `can0`/`vcan0`; an MCU target implements them against
-the chip's CAN peripheral driver (e.g. STM32 bxCAN). `can_protocol.c` and
-every task that calls `can_hal_send` are unaffected either way.
+`src/can/can_hal.h` exposes `can_hal_init/send/subscribe/shutdown`. The
+default host build's `can_hal_virtual.c` is an in-process broadcast bus
+(see its header comment for exactly what it does and doesn't model about
+real arbitration). `src/can/can_hal_socketcan.c` implements the same four
+functions against a real Linux kernel `PF_CAN`/`SOCK_RAW` socket bound to
+`vcan0` (overridable via the `BMS_CAN_IFACE` env var) or a real `can0`; an
+MCU target would implement them against the chip's CAN peripheral driver
+instead (e.g. STM32 bxCAN). `can_protocol.c` and every task that calls
+`can_hal_send` are unaffected by which backend is linked in.
+
+`make sim-socketcan` builds against this backend (Linux only; not part of
+the default `make sim`/`make test`, since `linux/can.h` doesn't exist on
+macOS). It needs its own `_DEFAULT_SOURCE` feature-test macro for the same
+reason `osal_posix.c` needs `_POSIX_C_SOURCE` — `struct ifreq`/`IFNAMSIZ`
+are hidden by glibc under strict `-std=c11` otherwise. A CAN_RAW socket
+only supports one blocking reader, so `can_hal_subscribe`'s multi-subscriber
+fan-out (matching the virtual bus's contract) is done in a background
+reader thread that dispatches each received frame to every registered
+callback, mirroring the virtual bus's own broadcast semantics.
+
+**There is no macOS/Docker Desktop dev path for this, and that's a real
+platform limitation, not a documentation gap:** Docker Desktop's Linux VM
+kernel doesn't include the `vcan` module at all (`modprobe vcan` fails with
+"Module vcan not found in directory ..."), verified directly, including
+with `--privileged --cap-add=NET_ADMIN`. There's no vcan0 to bind to inside
+a container on a Mac short of running a full, non-minimal Linux VM. CI's
+`socketcan` job is the actual verification that this backend works against
+a real kernel networking stack — it creates a genuine `vcan0` on GitHub's
+hosted Linux runner and confirms real frames traverse it, not just that the
+code compiles.
 
 ### What's intentionally *not* abstracted
 

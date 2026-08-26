@@ -38,6 +38,16 @@ jobs:
         run: make tidy CLANG_TIDY=clang-tidy
       - name: cppcheck
         run: make cppcheck-run
+      # can_hal_socketcan.c isn't in SIM_SRCS (it's Linux-only, so `make
+      # tidy`/`cppcheck-run` stay usable on macOS too), but this job is
+      # always Linux, so it's the one place able to statically check it.
+      - name: clang-tidy (SocketCAN backend, Linux-only file)
+        run: clang-tidy src/can/can_hal_socketcan.c -- -std=c11 -Isrc
+      - name: cppcheck (SocketCAN backend, Linux-only file)
+        run: |
+          cppcheck --enable=warning,performance,portability,style --std=c11 -Isrc \
+            --suppress=missingIncludeSystem --inline-suppr --error-exitcode=1 \
+            src/can/can_hal_socketcan.c
 
   coverage:
     runs-on: ubuntu-latest
@@ -73,3 +83,38 @@ jobs:
           lcov --version
       - name: Run tests with coverage instrumentation and report
         run: make coverage
+
+  socketcan:
+    # Real Linux only: creates an actual vcan0 kernel interface and sends
+    # traffic over it via can_hal_socketcan.c, not the in-process virtual
+    # bus can_hal_virtual.c backs the default build with. This does NOT
+    # work in Docker Desktop on macOS -- verified directly: its Linux VM
+    # kernel doesn't include the vcan module at all (`modprobe vcan` fails
+    # with "Module vcan not found"), so there's no local dev path for this
+    # on a Mac short of a full Linux VM. GitHub's hosted ubuntu-latest
+    # runner is a real, complete Linux kernel, so this job is the actual
+    # verification that the SocketCAN backend works against a real kernel
+    # networking stack, not just that it compiles.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up a real vcan0 interface
+        run: |
+          sudo modprobe vcan
+          sudo ip link add dev vcan0 type vcan
+          sudo ip link set up vcan0
+      - name: Install can-utils (candump, to verify real frames on the bus)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq can-utils
+      - name: Build the SocketCAN-backed simulator
+        run: make sim-socketcan
+      - name: Run against real vcan0 and verify actual frames appear on the bus
+        run: |
+          candump vcan0 -n 5 > /tmp/candump.log &
+          DUMP_PID=$!
+          BMS_CAN_IFACE=vcan0 ./build-socketcan/bms_sim &
+          SIM_PID=$!
+          wait $DUMP_PID
+          kill $SIM_PID 2>/dev/null || true
+          cat /tmp/candump.log
+          test -s /tmp/candump.log
+          grep -qE '\b100\b' /tmp/candump.log  # BMS_STATUS frame ID (0x100)

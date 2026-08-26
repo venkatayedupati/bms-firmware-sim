@@ -53,7 +53,14 @@ COVERAGE_FLAGS := --coverage -O0
 COVERAGE_OBJS := $(addprefix $(COVERAGE_BUILD_DIR)/,$(notdir $(TEST_SRCS:.c=.o)))
 vpath %.c $(sort $(dir $(TEST_SRCS)))
 
-.PHONY: all sim test clean run sanitize tidy cppcheck-run coverage \
+# SocketCAN backend: Linux-only (linux/can.h doesn't exist on macOS), not
+# part of the default build. Swaps the in-process virtual bus for a real
+# vcan0/can0 kernel interface -- see src/can/can_hal_socketcan.c and
+# docs/ARCHITECTURE.md "Portability".
+SOCKETCAN_BUILD_DIR := build-socketcan
+SOCKETCAN_SIM_SRCS := $(filter-out src/can/can_hal_virtual.c,$(SIM_SRCS)) src/can/can_hal_socketcan.c
+
+.PHONY: all sim test clean run sanitize tidy cppcheck-run coverage sim-socketcan \
 	tsan-sim tsan-test tsan-run asan-sim asan-test
 
 all: sim test
@@ -167,5 +174,14 @@ coverage: $(COVERAGE_BUILD_DIR)/bms_tests
 		--output-file $(COVERAGE_BUILD_DIR)/coverage.info --rc branch_coverage=1 --quiet
 	lcov --list $(COVERAGE_BUILD_DIR)/coverage.info --rc branch_coverage=1
 
+# --- SocketCAN backend (Linux only) ---
+sim-socketcan: $(SOCKETCAN_BUILD_DIR)/bms_sim
+
+$(SOCKETCAN_BUILD_DIR)/bms_sim: $(SOCKETCAN_SIM_SRCS) | $(SOCKETCAN_BUILD_DIR)
+	$(CC) $(CFLAGS) $(SOCKETCAN_SIM_SRCS) -o $@ $(LDFLAGS)
+
+$(SOCKETCAN_BUILD_DIR):
+	mkdir -p $(SOCKETCAN_BUILD_DIR)
+
 clean:
-	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR) $(SOCKETCAN_BUILD_DIR)

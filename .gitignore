@@ -2,6 +2,7 @@ build/
 build-tsan/
 build-asan/
 build-coverage/
+build-socketcan/
 *.o
 *.dSYM/
 .DS_Store

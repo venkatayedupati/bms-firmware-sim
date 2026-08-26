@@ -23,11 +23,14 @@ Five things distinguish it from a typical embedded portfolio project:
    parts of a real BMS a review board will actually ask about. See
    ["Why coulomb counting instead of something fancier?"](docs/INTERVIEW_NOTES.md)
    for the design rationale.
-2. **It's built to be ported, not just to run once.** The OS calls (`osal/`)
-   and CAN transport (`can/can_hal.h`) are both behind clean interfaces. The
-   host build implements them with pthreads and an in-process virtual bus;
-   swapping in FreeRTOS and SocketCAN/a real CAN peripheral touches only
-   those two files, not the application logic. See
+2. **It's built to be ported, and one port is already real, not aspirational.**
+   The OS calls (`osal/`) and CAN transport (`can/can_hal.h`) are both behind
+   clean interfaces. The default host build implements them with pthreads
+   and an in-process virtual bus; `can_hal_socketcan.c` is a second, real
+   backend binding to an actual Linux kernel `vcan0`/`can0` interface
+   (`make sim-socketcan`), with CI creating a genuine `vcan0` and confirming
+   real frames traverse it — not just that the code compiles. FreeRTOS is
+   the same story, one port away: only `osal/` would need a new file. See
    [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#portability).
 3. **It's tested, not just demoed.** 58 unit tests cover the SoC math, every
    fault-state transition (including the fault-latch-to-SHUTDOWN path), and
@@ -91,6 +94,7 @@ make sanitize      # build + run the sim and tests under TSan, ASan, and UBSan
 make tidy          # clang-tidy (requires LLVM; see CLANG_TIDY in the Makefile)
 make cppcheck-run  # cppcheck
 make coverage      # build + run tests with coverage instrumentation, print report
+make sim-socketcan # Linux only: build against real vcan0/can0 instead of the virtual bus
 ```
 
 Available scenarios: `nominal`, `overvoltage`, `undervoltage`, `overtemp`,
@@ -118,7 +122,7 @@ the cell imbalance that overvoltage on one cell necessarily causes (bit 3).
 ```
 src/
   osal/     OS abstraction layer (tasks, queues, mutexes) — pthread impl today
-  can/      CAN HAL (virtual bus) + protocol pack/unpack (DBC-equivalent)
+  can/      CAN HAL (virtual bus + real SocketCAN backend) + protocol pack/unpack
   bms/      Domain logic: cell model, SoC Kalman filter, fault state machine
   tasks/    The 5 periodic tasks + their shared app_context_t
   main.c    Wiring and sim lifecycle
@@ -130,6 +134,4 @@ docs/       Architecture, CAN protocol spec, test plan
 
 - Replace the pthread OSAL backend with real FreeRTOS (`osal_freertos.c`) and
   cross-compile for an STM32/ESP32 target with real ADC-driven cell sensing.
-- Replace SocketCAN's absence on macOS with a Linux/Docker dev path that
-  exercises a real `vcan0` interface via `can_hal_socketcan.c`.
 - CAN-FD support and ISO 26262-style fault severity classification.
