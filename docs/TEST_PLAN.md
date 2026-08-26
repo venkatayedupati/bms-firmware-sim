@@ -10,14 +10,50 @@ the simulator itself and observing correct behavior end to end, since
 timing-dependent concurrent behavior is a poor fit for deterministic unit
 assertions.
 
-53 tests, all passing, run with `make test`, no external framework or
+58 tests, all passing, run with `make test`, no external framework or
 network access required (`test/test.h` is a ~30-line macro shim).
+
+## Sanitizers
+
+`make sanitize` (also run in CI, Linux-only — see "Sanitizers aren't the
+same tool" below) builds and runs both the simulator and the test suite
+under two sanitizer configurations `make test` alone doesn't cover:
+
+- **ThreadSanitizer** (`make tsan-run`, `make tsan-test`) — flags
+  unsynchronized concurrent memory access (data races). Caught a real one:
+  `g_shutdown` in `src/osal/osal_posix.c` was a plain `volatile int` written
+  by the main thread and read by every task thread with no synchronization.
+  `volatile` blocks compiler reordering/caching, but gives *no* cross-thread
+  atomicity or visibility guarantee in C — a real data race, not a
+  theoretical nitpick, fixed by switching to C11 `atomic_int` with
+  `atomic_load`/`atomic_store`.
+- **AddressSanitizer + UndefinedBehaviorSanitizer** (`make asan-sim`,
+  `make asan-test`) — flag memory-safety errors (out-of-bounds, use-after-
+  free) and undefined behavior (signed overflow, misaligned access). Most
+  relevant to `can_protocol.c`'s fixed-size wire-format pack/unpack and the
+  fixed-point/floating-point arithmetic in `soc_estimator.c` and
+  `fault_manager.c`.
+
+**Sanitizers aren't the same tool, and they don't overlap as much as they
+sound like they should.** TSan and ASan instrument memory access differently
+and can't be linked into the same binary, hence the separate `build-tsan/`
+and `build-asan/` trees. More importantly: TSan would **not** have caught
+the `app_context_t.latest_reading` startup-ordering bug described below,
+even though it's also a concurrency bug found by running the simulator
+repeatedly — `latest_reading` was always read and written under the correct
+mutex, so there was no unsynchronized access for TSan to flag. That bug was
+a *stale-initial-value logic error*, a different bug class entirely from
+what these tools detect. Sanitizers catch synchronization and memory-safety
+violations; they don't catch "this shared state's default value doesn't
+represent a real physical reading."
 
 ## Coverage by module
 
 ### `soc_estimator` (`test/test_soc_estimator.c`)
 
-SoC is a scalar Kalman filter fusing a Coulomb-counting prediction with an
+SoC is a 2-state Kalman filter tracking both the estimated SoC and the
+current sensor's own calibration bias, fusing a Coulomb-counting prediction
+(current integrated after subtracting the current bias estimate) with an
 OCV-lookup measurement every update (see `src/bms/soc_estimator.c`). Most
 tests below feed a voltage the OCV table reads as *exactly* the same
 percentage the Coulomb count predicts — making the residual exactly zero,
@@ -37,7 +73,9 @@ filter whose whole point is blending two noisy signals.
   directly: exact breakpoints, linear interpolation between them, and
   clamping outside the table's voltage range.
 - The filter's actual behavior (`test_soc_estimator_kalman_suite`), with
-  numeric expectations verified by hand against the update equations:
+  numeric expectations verified against the update equations via a
+  throwaway probe program (a 2-state covariance recursion isn't something
+  to trust hand arithmetic for):
   - At rest, a large deliberate disagreement between the Coulomb count and
     the OCV reading is corrected quickly and *converges monotonically*
     over successive updates (checked via `soc_estimator_get_variance_x1000`
@@ -45,9 +83,18 @@ filter whose whole point is blending two noisy signals.
     wait.
   - Under sustained heavy load, an equally large disagreement barely moves
     the estimate at all, and the filter's variance is identical to the
-    agreeing case — disagreement biases the point estimate a little, not
-    the filter's confidence in it, since measurement noise (not a
-    threshold) is what's suppressing trust in the voltage reading.
+    agreeing case — the covariance recursion depends only on current/dt/
+    capacity, never on what the measurement says, so disagreement biases
+    the point estimate a little without changing the filter's confidence
+    in it.
+  - The filter actually learns a persistent current-sensor bias: fed a
+    constant +10 centiamp sensor offset while the pack is genuinely at
+    rest (voltage confirming the true, unchanging SoC every cycle), the
+    bias estimate (`soc_estimator_get_bias_ca_x10`) climbs monotonically
+    toward the true value over repeated cycles instead of the same drift
+    being fought from scratch every time — the actual point of tracking
+    bias as its own state rather than folding it into undifferentiated
+    process noise.
 
 ### `fault_manager` (`test/test_fault_manager.c`)
 
@@ -85,7 +132,17 @@ Walks the full state diagram in `docs/ARCHITECTURE.md`:
   the log output, not by assertions, because asserting on wall-clock
   interleaving of five pthreads is either flaky or trivial depending on how
   loosely you write it. The state-machine and SoC logic those tasks call
-  into is fully unit tested; the tasks themselves are thin wrappers.
+  into is fully unit tested; the tasks themselves are thin wrappers. This
+  is exactly how a real startup race was actually caught while adding the
+  SoC Kalman filter: `app_context_t.latest_reading` started zero-initialized,
+  and if the soc task's thread ran its first cycle before the sensor task
+  published its first real reading, an all-zero reading looked like "at
+  rest, pack is empty" — precisely the condition where the filter trusts
+  the (bogus) voltage most. `make run` reproduced it in roughly 1 run out of
+  ~30 before the fix (`app_context_init` now seeds `latest_reading` with a
+  sane nominal/at-rest default); no unit test would have caught this, since
+  it depends on real thread-scheduling nondeterminism, not the SoC math
+  itself (which was, and is, correct).
 - **The virtual CAN bus's arbitration behavior** — `can_hal_virtual.c`
   documents in its header comment exactly what it does and doesn't model
   (broadcast delivery, not real contention/backoff). Testing it against

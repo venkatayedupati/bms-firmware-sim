@@ -133,9 +133,6 @@ payoff, which is why it's a direct, swappable module instead of a HAL.
 
 ## Future work (see also README "Roadmap")
 
-- Extend the SoC Kalman filter to a proper multi-state model (SoC plus a
-  current-sensor bias term) instead of a scalar filter with hand-tuned
-  noise constants (see `src/bms/soc_estimator.c`).
 - CAN-FD and larger pack sizes (this demo hardcodes a 4S pack for clarity).
 - ISO 26262-style fault severity/ASIL classification instead of a flat
   bitmask.

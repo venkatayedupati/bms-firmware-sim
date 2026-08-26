@@ -1,4 +1,6 @@
 build/
+build-tsan/
+build-asan/
 *.o
 *.dSYM/
 .DS_Store

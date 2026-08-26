@@ -16,3 +16,14 @@ jobs:
         run: make sim
       - name: Run unit tests
         run: make test
+
+  sanitize:
+    # Linux only: TSan/ASan interceptor behavior for pthreads is most mature
+    # there, and one consistent platform is enough to get sanitizer signal
+    # without doubling flaky-CI surface area from a second OS's libc/runtime
+    # quirks.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ThreadSanitizer + AddressSanitizer/UBSan (sim + tests)
+        run: make sanitize

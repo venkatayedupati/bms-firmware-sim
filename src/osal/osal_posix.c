@@ -1,6 +1,7 @@
 #include "osal.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -28,7 +29,13 @@ struct osal_mutex {
     pthread_mutex_t m;
 };
 
-static volatile int g_shutdown = 0;
+/* volatile alone only blocks compiler reordering/caching -- it gives no
+   cross-thread atomicity or visibility guarantee in C, so a plain volatile
+   int written by one thread and read by others is a real data race (caught
+   by ThreadSanitizer, not just a theoretical nitpick). atomic_int with the
+   default (sequentially consistent) memory order fixes that at negligible
+   cost for a flag checked once per task loop iteration. */
+static atomic_int g_shutdown = 0;
 static struct timespec g_start_time;
 static pthread_once_t g_clock_once = PTHREAD_ONCE_INIT;
 
@@ -162,10 +169,10 @@ void osal_start_scheduler(void) {
     /* Host tasks are already running as pthreads; just block the main
        thread until shutdown is requested (e.g. by the watchdog or a
        fixed sim duration in main.c). */
-    while (!g_shutdown) {
+    while (!atomic_load(&g_shutdown)) {
         osal_task_delay_ms(50);
     }
 }
 
-void osal_request_shutdown(void) { g_shutdown = 1; }
-int osal_is_shutdown_requested(void) { return g_shutdown; }
+void osal_request_shutdown(void) { atomic_store(&g_shutdown, 1); }
+int osal_is_shutdown_requested(void) { return atomic_load(&g_shutdown); }
