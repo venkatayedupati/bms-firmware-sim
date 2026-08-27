@@ -187,9 +187,20 @@ jobs:
         run: make freertos-build
       - name: Boot under QEMU and verify the real FreeRTOS kernel runs this project's actual tasks
         run: |
-          timeout 5 qemu-system-arm -M mps2-an385 -nographic \
+          # 10s, not 5s: stack_report.c's one-shot report only fires 3s
+          # (simulated) after boot, and real wall-clock time to reach that
+          # point depends on this runner's QEMU emulation speed, not just
+          # the simulated delay.
+          timeout 10 qemu-system-arm -M mps2-an385 -nographic \
             -kernel targets/qemu_mps2_an385/build/bms_sim.elf > /tmp/qemu.log 2>&1 || true
           cat /tmp/qemu.log
           for t in sensor soc fault can watchdog; do
             grep -q "$t .*task started" /tmp/qemu.log
+          done
+          # Confirms stack_report.c's real per-task stack high-water-mark
+          # report actually printed -- see docs/ARCHITECTURE.md "Memory
+          # footprint" -- not just that the sim booted.
+          grep -q "Stack high-water marks" /tmp/qemu.log
+          for t in sensor soc fault can watchdog stack_report IDLE; do
+            grep -q "^$t" /tmp/qemu.log
           done

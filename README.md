@@ -69,6 +69,13 @@ Five things distinguish it from a typical embedded portfolio project:
    this project's own pack functions and checks the result against known
    values, catching the kind of subtle Motorola bit-position mistake that
    a `.dbc` parsing without error would otherwise hide.
+8. **Memory footprint is measured, not assumed.** The FreeRTOS/QEMU build
+   reports real flash/RAM usage (`arm-none-eabi-size`) on every build, and
+   boots a one-shot debug task (`targets/qemu_mps2_an385/stack_report.c`)
+   that prints every task's *actual* stack high-water mark a few seconds
+   in — the real embedded-review question "what's the footprint, and is
+   any task's stack over- or under-sized" answered with real numbers, not
+   a guess. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#memory-footprint).
 
 ## Architecture at a glance
 

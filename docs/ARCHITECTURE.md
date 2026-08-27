@@ -177,6 +177,65 @@ being "portable" across POSIX systems is a claim, not a given, and it's only
 verified by actually building on the other POSIX system, not by assuming
 one Unix-like libc behaves like another.
 
+### Memory footprint
+
+Two different questions, both worth answering for a real embedded target,
+and easy to conflate:
+
+**Flash/RAM footprint of the binary itself.** `targets/qemu_mps2_an385/Makefile`
+runs `arm-none-eabi-size` on every build. Current numbers:
+
+```
+   text	   data	    bss	    dec	    hex	filename
+  16632	    160	  34200	  50992	   c730	build/bms_sim.elf
+```
+
+Flash usage is `text + data` (code plus initialized globals actually
+stored in flash and copied to RAM at boot) ≈ 16.4 KB. RAM usage is
+`data + bss` (initialized globals' RAM copy, plus zero-initialized/
+uninitialized globals) ≈ 33.6 KB — dominated by `configTOTAL_HEAP_SIZE`,
+FreeRTOS's static 32 KB heap arena (`FreeRTOSConfig.h`), which is where
+every task's stack and every OSAL `osal_*_create` object actually comes
+from (`heap_4.c`, this project's chosen FreeRTOS heap implementation).
+Both numbers comfortably fit even a small Cortex-M3 (the mps2-an385 model
+QEMU emulates has 4 MB flash / 4 MB RAM), which tracks: this is five small
+periodic tasks and a handful of small state machines, not a memory-hungry
+workload.
+
+**Per-task stack high-water marks.** The binary-level number above says
+nothing about whether any *individual* task's stack allocation
+(`configMINIMAL_STACK_SIZE * 2` = 256 words for every task here — see
+`osal_task_create` in `osal_freertos.c`) is oversized, undersized, or about
+right; that needs a real runtime measurement, not a static one, since it
+depends on each task's actual call depth and locals under real execution.
+`targets/qemu_mps2_an385/stack_report.c` is a one-shot debug task
+(started from `board_main.c`, calls FreeRTOS's `task.h` directly rather
+than going through the OSAL, same as `freertos_hooks.c`) that waits 3s —
+long enough for every task to run several periods and settle into its
+steady-state stack depth — then calls FreeRTOS's own `vTaskListTasks()`
+and prints the result. A real boot's output:
+
+```
+Name            State  Prio  StackHWM  TaskNum
+stack_report    X      1     210       6
+IDLE            R      0     102       7
+fault           B      5     152       3
+sensor          B      4     156       1
+can             B      3     128       4
+watchdog        B      6     158       5
+soc             B      3     154       2
+```
+
+`StackHWM` is unused stack, in words, at the lowest point it's ever
+reached — i.e. `can`'s 128 words free out of 256 allocated means it used
+its other 128 at the deepest point since boot. Every task here has a
+healthy margin (no task anywhere near 0), meaning 256 words wasn't a wildly
+wrong guess for any of them — but nothing here claims it's already been
+*tuned* down to a minimal value; on real hardware with real flash/RAM
+constraints, this is exactly the report a real firmware team would use to
+right-size each task's stack allocation instead of leaving every task at
+the same guessed value.
+
 ### CAN HAL → SocketCAN / real peripheral
 
 `src/can/can_hal.h` exposes `can_hal_init/send/subscribe/shutdown`. The

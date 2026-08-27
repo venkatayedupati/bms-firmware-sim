@@ -32,6 +32,12 @@
 #define configUSE_TICK_HOOK                        0
 #define configGENERATE_RUN_TIME_STATS              0
 
+/* Needed by vTaskListTasks() (see stack_report.c): a real per-task stack
+   high-water-mark report, not just the whole-binary text/data/bss totals
+   `arm-none-eabi-size` already prints at build time. */
+#define configUSE_TRACE_FACILITY                   1
+#define configUSE_STATS_FORMATTING_FUNCTIONS       1
+
 /* Software timers -- unused by this project's tasks, kept minimal. */
 #define configUSE_TIMERS                          0
 
@@ -54,6 +60,7 @@
 #define INCLUDE_vTaskCleanUpResources              0
 #define INCLUDE_vTaskSuspend                      0
 #define INCLUDE_xTaskGetCurrentTaskHandle          0
+#define INCLUDE_uxTaskGetStackHighWaterMark        1
 
 /* Cortex-M3 interrupt priority configuration -- standard values for this
    port; see portable/GCC/ARM_CM3/portmacro.h for what these mean. */

@@ -72,6 +72,7 @@ BOARD_SRCS := \
 	uart.c \
 	syscalls.c \
 	freertos_hooks.c \
+	stack_report.c \
 	board_main.c
 
 SRCS := $(APP_SRCS) $(FREERTOS_SRCS) $(BOARD_SRCS)

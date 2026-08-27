@@ -15,6 +15,7 @@
 #include <stdio.h>
 
 #include "uart.h"
+#include "stack_report.h"
 #include "../../src/osal/osal.h"
 #include "../../src/can/can_hal.h"
 #include "../../src/tasks/app_context.h"
@@ -42,6 +43,8 @@ int main(void) {
     osal_task_create("fault", task_fault_main, &g_ctx, 4);
     osal_task_create("can", task_can_main, &g_ctx, 2);
     osal_task_create("watchdog", task_watchdog_main, &g_ctx, 5);
+
+    stack_report_start(); /* one-shot stack high-water-mark report; see stack_report.c */
 
     osal_start_scheduler(); /* does not return */
 
