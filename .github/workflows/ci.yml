@@ -1,3 +1,10 @@
+# actions/checkout is pinned to a commit SHA rather than the floating `v4`
+# tag (supply-chain hardening: a tag can be repointed by whoever controls
+# it, a commit SHA can't) -- the `# v4.x.y` comment is just for a human
+# reading this file, not something GitHub Actions itself resolves. To bump
+# it: `gh api repos/actions/checkout/git/refs/tags/v4 --jq '.object.sha'`
+# for the SHA the moving v4 tag currently points to, then update every
+# occurrence below and the comment.
 name: CI
 
 on:
@@ -11,7 +18,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build simulator
         run: make sim
       - name: Run unit tests
@@ -24,14 +31,14 @@ jobs:
     # quirks.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: ThreadSanitizer + AddressSanitizer/UBSan (sim + tests)
         run: make sanitize
 
   static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install clang-tidy and cppcheck
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-tidy cppcheck
       - name: clang-tidy
@@ -69,7 +76,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # Ubuntu 24.04's apt package is lcov 2.0-1, which has a real rendering
       # bug in `lcov --list`'s function-coverage percentage column (verified
       # directly: the underlying .info data's FNH/FNF counts were already
@@ -111,7 +118,7 @@ jobs:
     # against those same known values.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # Ubuntu 24.04's system Python blocks a bare `pip install` (PEP 668,
       # "externally-managed-environment") -- verified directly -- hence the
       # venv instead of installing cantools globally.
@@ -134,7 +141,7 @@ jobs:
     # runner. 120s is a fixed CI budget, not a real fuzzing campaign length.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install clang
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang
       - name: Fuzz can_protocol.c's unpack functions (120s budget)
@@ -153,7 +160,7 @@ jobs:
     # against a real vcan0 if you have an environment that has one.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build the SocketCAN-backed simulator (compiles + links against real Linux CAN headers)
         run: make sim-socketcan
 
@@ -168,7 +175,7 @@ jobs:
     # "Portability".
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
       - name: Install qemu-system-arm
