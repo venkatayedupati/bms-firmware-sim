@@ -63,7 +63,7 @@ SOCKETCAN_SIM_SRCS := $(filter-out src/can/can_hal_virtual.c,$(SIM_SRCS)) src/ca
 .PHONY: all sim test clean run sanitize tidy cppcheck-run coverage sim-socketcan run-socketcan \
 	freertos-build freertos-run freertos-clean \
 	tsan-sim tsan-test tsan-run asan-sim asan-test \
-	fuzz-build fuzz-run
+	fuzz-build fuzz-run dbc-verify
 
 all: sim test
 
@@ -235,5 +235,26 @@ fuzz-run: fuzz-build
 	mkdir -p fuzz/corpus
 	./$(FUZZ_BUILD_DIR)/fuzz_can_protocol -max_total_time=$(FUZZ_TIME) fuzz/corpus
 
+# --- DBC verification ---
+# dbc/bms.dbc is a real cantools/Vector CANoe-loadable DBC, hand-written
+# from docs/CAN_PROTOCOL.md's spec -- Motorola (big-endian) start-bit
+# arithmetic is easy to get subtly wrong by hand, so this doesn't just trust
+# it: verify_dbc.c packs known values through this project's actual
+# can_protocol_pack_* functions, and verify_dbc.py decodes the resulting
+# real wire bytes via cantools and checks the result against those same
+# known values. PYTHON defaults to python3 on PATH; CI uses a venv (see
+# ci.yml) since Ubuntu 24.04's system Python blocks a bare `pip install`.
+PYTHON ?= python3
+DBC_VERIFY_BUILD_DIR := build-dbc-verify
+
+$(DBC_VERIFY_BUILD_DIR):
+	mkdir -p $(DBC_VERIFY_BUILD_DIR)
+
+$(DBC_VERIFY_BUILD_DIR)/verify_dbc: src/can/can_protocol.c dbc/verify_dbc.c | $(DBC_VERIFY_BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc -Isrc/can src/can/can_protocol.c dbc/verify_dbc.c -o $@
+
+dbc-verify: $(DBC_VERIFY_BUILD_DIR)/verify_dbc
+	./$(DBC_VERIFY_BUILD_DIR)/verify_dbc | $(PYTHON) dbc/verify_dbc.py
+
 clean:
-	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR) $(SOCKETCAN_BUILD_DIR) $(FUZZ_BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR) $(SOCKETCAN_BUILD_DIR) $(FUZZ_BUILD_DIR) $(DBC_VERIFY_BUILD_DIR)

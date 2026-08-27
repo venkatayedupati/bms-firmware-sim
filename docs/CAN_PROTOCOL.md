@@ -1,9 +1,11 @@
 # CAN Protocol
 
-DBC-equivalent message spec for this ECU node. Real projects define this in
-a `.dbc` file loaded by tools like `cantools` or Vector CANoe; it's written
-here as a table for readability, but the field layout, byte order, and
-scale/offset conventions below are exactly what a `.dbc` would encode.
+DBC-equivalent message spec for this ECU node, written here as a table for
+readability. A real, loadable [`dbc/bms.dbc`](../dbc/bms.dbc) encodes the
+exact same layout — see `make dbc-verify` (also run in CI), which checks
+that `dbc/bms.dbc` decodes real wire bytes produced by this project's own
+`can_protocol_pack_*` functions back to the correct values via `cantools`,
+rather than trusting hand-derived DBC bit-position math on its own.
 
 **Byte order:** big-endian for every multi-byte signal.
 **Fixed point only:** no floats cross the wire — every signal is an integer

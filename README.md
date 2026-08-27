@@ -62,6 +62,13 @@ Five things distinguish it from a typical embedded portfolio project:
    tens of millions of runs — see
    [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md#fuzzing) for why that's the
    expected result given the code, not fuzzing doing nothing.
+7. **The DBC isn't just a doc table — it's a real, checked artifact.**
+   [`dbc/bms.dbc`](dbc/bms.dbc) loads in `cantools`/Vector CANoe like a
+   real vehicle DBC would, and `make dbc-verify` (also in CI) proves it's
+   *correct*, not just well-formed: it decodes real wire bytes produced by
+   this project's own pack functions and checks the result against known
+   values, catching the kind of subtle Motorola bit-position mistake that
+   a `.dbc` parsing without error would otherwise hide.
 
 ## Architecture at a glance
 
@@ -112,6 +119,7 @@ make tidy          # clang-tidy (requires LLVM; see CLANG_TIDY in the Makefile)
 make cppcheck-run  # cppcheck
 make coverage      # build + run tests with coverage instrumentation, print report
 make fuzz-run      # fuzz can_protocol.c's unpack functions under ASan/UBSan (needs a libFuzzer-capable clang; see docs/TEST_PLAN.md#fuzzing)
+make dbc-verify    # check dbc/bms.dbc against real can_protocol.c output via cantools (needs `pip install cantools`)
 make sim-socketcan # Linux only: build against real vcan0/can0 instead of the virtual bus
 make run-socketcan # ...and run it (needs a real vcan0/can0 already set up)
 ```
@@ -167,6 +175,7 @@ third_party/
   FreeRTOS-Kernel/  Vendored FreeRTOS kernel (git submodule)
 test/       74 dependency-free unit tests (no external test framework)
 fuzz/       libFuzzer harness for can_protocol.c's unpack functions
+dbc/        Real .dbc file + a cantools-based check that it matches can_protocol.c
 docs/       Architecture, CAN protocol spec, test plan
 ```
 

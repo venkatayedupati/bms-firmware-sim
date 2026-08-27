@@ -4,6 +4,7 @@ build-asan/
 build-coverage/
 build-socketcan/
 build-fuzz/
+build-dbc-verify/
 targets/qemu_mps2_an385/build/
 fuzz/corpus/
 crash-*

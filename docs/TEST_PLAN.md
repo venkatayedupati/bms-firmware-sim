@@ -121,6 +121,22 @@ Line Tools clang doesn't bundle (verified directly: linking
 Homebrew's LLVM and Ubuntu's plain `clang` apt package both do — same
 `FUZZ_CC` override pattern as `CLANG_TIDY` above.
 
+## DBC verification
+
+`make dbc-verify` (also run in CI, `dbc-verify` job) checks
+[`dbc/bms.dbc`](../dbc/bms.dbc) — a real, `cantools`/Vector CANoe-loadable
+DBC hand-written from `docs/CAN_PROTOCOL.md`'s spec — against this
+project's own code, not just against itself. Motorola (big-endian)
+start-bit arithmetic (DBC's `start_bit|length@0±` notation) is easy to get
+subtly wrong by hand and a `.dbc` file loading without error doesn't mean
+its bit positions are right; `dbc/verify_dbc.c` packs known input values
+through the real `can_protocol_pack_*` functions, and `dbc/verify_dbc.py`
+decodes the resulting real wire bytes via `cantools` and checks the result
+against those same known values — an independent, executable check that
+the two representations of this protocol (the hand-written `.dbc` and the
+hand-written C packing code) actually agree, not two copies of the same
+mistake.
+
 ## Code coverage
 
 `make coverage` (also run in CI) builds with `--coverage`, runs the test

@@ -58,6 +58,13 @@ jobs:
           cppcheck --enable=warning,performance,portability,style --std=c11 -Isrc \
             --suppress=missingIncludeSystem --inline-suppr --error-exitcode=1 \
             fuzz/fuzz_can_protocol.c
+      - name: clang-tidy (DBC verification probe)
+        run: clang-tidy dbc/verify_dbc.c -- -std=c11 -Isrc -Isrc/can
+      - name: cppcheck (DBC verification probe)
+        run: |
+          cppcheck --enable=warning,performance,portability,style --std=c11 -Isrc -Isrc/can \
+            --suppress=missingIncludeSystem --inline-suppr --error-exitcode=1 \
+            dbc/verify_dbc.c
 
   coverage:
     runs-on: ubuntu-latest
@@ -93,6 +100,28 @@ jobs:
           lcov --version
       - name: Run tests with coverage instrumentation and report
         run: make coverage
+
+  dbc-verify:
+    # dbc/bms.dbc is a real cantools/Vector CANoe-loadable DBC hand-written
+    # from docs/CAN_PROTOCOL.md's spec. Motorola (big-endian) DBC start-bit
+    # arithmetic is easy to get subtly wrong by hand, so this doesn't just
+    # trust it -- dbc/verify_dbc.c packs known values through this
+    # project's actual can_protocol_pack_* functions, and dbc/verify_dbc.py
+    # decodes the resulting real wire bytes via cantools and checks them
+    # against those same known values.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Ubuntu 24.04's system Python blocks a bare `pip install` (PEP 668,
+      # "externally-managed-environment") -- verified directly -- hence the
+      # venv instead of installing cantools globally.
+      - name: Install cantools into a venv
+        run: |
+          python3 -m venv /tmp/dbc-venv
+          /tmp/dbc-venv/bin/pip install -q cantools
+          echo "/tmp/dbc-venv/bin" >> "$GITHUB_PATH"
+      - name: Verify dbc/bms.dbc decodes real can_protocol.c output correctly
+        run: make dbc-verify PYTHON=/tmp/dbc-venv/bin/python3
 
   fuzz:
     # can_protocol.c's unpack_* functions are the one place in this codebase

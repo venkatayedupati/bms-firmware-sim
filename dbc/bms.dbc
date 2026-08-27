@@ -1,0 +1,68 @@
+VERSION ""
+
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_DEF_DEF_REL_
+    BU_SG_REL_
+    BU_EV_REL_
+    BU_BO_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: BMS CHARGER
+
+BO_ 256 BMS_STATUS: 6 BMS
+ SG_ pack_voltage_mv : 7|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ pack_current_ca : 23|16@0- (0.01,0) [-327.68|327.67] "A" Vector__XXX
+ SG_ soc_percent_x2 : 39|8@0+ (0.5,0) [0|100] "%" Vector__XXX
+ SG_ state : 47|8@0+ (1,0) [0|3] "" Vector__XXX
+
+BO_ 257 CELL_VOLTAGES: 10 BMS
+ SG_ cell_1_mv : 7|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ cell_2_mv : 23|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ cell_3_mv : 39|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ cell_4_mv : 55|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ cell_5_mv : 71|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+
+BO_ 128 FAULT_REPORT: 3 BMS
+ SG_ fault_bitmask : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ severity : 23|8@0+ (1,0) [0|4] "" Vector__XXX
+
+BO_ 512 CHARGE_COMMAND: 2 CHARGER
+ SG_ requested_current_x10 : 7|16@0+ (0.1,0) [0|6553.5] "A" Vector__XXX
+
+CM_ BU_ BMS "This ECU node -- see src/main.c and docs/ARCHITECTURE.md.";
+CM_ BU_ CHARGER "External charger; only CHARGE_COMMAND's sender is modeled, not a full node.";
+CM_ BO_ 256 "Routine telemetry, TX every 100ms.";
+CM_ BO_ 257 "Cell voltages, TX every 100ms. DLC is BMS_CELL_COUNT*2 = 10 bytes -- exceeds classic CAN's 8-byte limit, needs CAN-FD. See docs/CAN_PROTOCOL.md.";
+CM_ BO_ 128 "Fault report, TX on active_faults change only (not periodic). Deliberately the lowest CAN ID this node sends, so it wins lowest-ID-wins arbitration over routine telemetry if both are pending at once.";
+CM_ SG_ 128 fault_bitmask "Bit 0 OVERVOLTAGE (ASIL D), bit 1 UNDERVOLTAGE (ASIL C), bit 2 OVERTEMP (ASIL D), bit 3 CELL_IMBALANCE (ASIL B), bit 4 TASK_WATCHDOG (ASIL D). See docs/CAN_PROTOCOL.md for the full per-bit table.";
+CM_ SG_ 128 severity "Worst ISO 26262-style ASIL level among active_faults (worst-wins, not first-set or summed); see the VAL_ table on this signal and fault_manager_get_severity().";
+CM_ BO_ 512 "RX only. This node currently only logs the requested current (see task_can.c:on_charge_command); a v2 would clamp/veto it against the fault state before acting on it.";
+
+VAL_ 256 state 0 "NORMAL" 1 "WARNING" 2 "FAULT" 3 "SHUTDOWN" ;
+VAL_ 128 severity 0 "ASIL_QM" 1 "ASIL_A" 2 "ASIL_B" 3 "ASIL_C" 4 "ASIL_D" ;
