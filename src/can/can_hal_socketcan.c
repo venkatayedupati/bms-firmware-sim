@@ -7,6 +7,19 @@
  * docs/ARCHITECTURE.md "Portability" for what running against a real
  * kernel networking stack proves that the virtual bus can't.
  *
+ * CAN-FD aware, not just classic CAN: CELL_VOLTAGES needs more than 8
+ * bytes once BMS_CELL_COUNT > 4 (see can_hal.h and docs/CAN_PROTOCOL.md),
+ * which only a real struct canfd_frame can carry on the wire. Sending: a
+ * frame of 8 bytes or fewer still goes out as a classic struct can_frame
+ * (interoperates with non-FD-aware listeners); anything larger goes out
+ * as struct canfd_frame, which needs CAN_RAW_FD_FRAMES enabled on the
+ * socket. Receiving: SocketCAN delivers either struct can_frame (16
+ * bytes) or struct canfd_frame (72 bytes) on the same read(), sized
+ * according to what actually arrived -- read() into the larger canfd_frame
+ * buffer and dispatch on the returned byte count, the standard pattern
+ * documented in the kernel's own Documentation/networking/can.rst and
+ * used by can-utils' candump.
+ *
  * A CAN_RAW socket only supports one blocking reader; can_hal_subscribe's
  * multi-subscriber fan-out (matching can_hal_virtual.c's contract) is done
  * here in application code, via one background reader thread dispatching
@@ -39,6 +52,7 @@
 
 #define MAX_SUBSCRIBERS 8
 #define DEFAULT_CAN_IFACE "vcan0"
+#define CLASSIC_CAN_MAX_LEN 8 /* frames this size or smaller still go out as struct can_frame */
 /* read() on a CAN_RAW socket blocks indefinitely with no built-in way to
    interrupt it; SO_RCVTIMEO gives the reader thread a chance to notice
    can_hal_shutdown() instead of blocking forever past it. */
@@ -58,7 +72,7 @@ static atomic_int g_running = 0;
 
 static void rx_task_main(void *arg) {
     (void)arg;
-    struct can_frame raw;
+    struct canfd_frame raw; /* sized for the larger of the two frame types */
 
     while (atomic_load(&g_running)) {
         ssize_t n = read(g_sock, &raw, sizeof(raw));
@@ -68,12 +82,31 @@ static void rx_task_main(void *arg) {
             }
             break; /* socket closed out from under us, or a real error */
         }
-        if (n != (ssize_t)sizeof(raw)) continue; /* short/garbled read; drop it */
+
+        canid_t can_id;
+        uint8_t payload_len;
+        const uint8_t *payload_data;
+        if (n == CANFD_MTU) {
+            can_id = raw.can_id;
+            payload_len = raw.len;
+            payload_data = raw.data;
+        } else if (n == CAN_MTU) {
+            /* Reinterpreting the same buffer as the smaller classic frame
+               type is the standard pattern for this exact situation (see
+               file header comment), not an aliasing hazard specific to
+               this code. */
+            const struct can_frame *classic = (const struct can_frame *)&raw;
+            can_id = classic->can_id;
+            payload_len = classic->can_dlc;
+            payload_data = classic->data;
+        } else {
+            continue; /* neither a classic nor an FD frame; drop it */
+        }
 
         can_frame_t frame;
-        frame.id = raw.can_id & CAN_SFF_MASK; /* this project only uses 11-bit standard IDs */
-        frame.dlc = (raw.can_dlc > CAN_MAX_DLC) ? CAN_MAX_DLC : raw.can_dlc;
-        memcpy(frame.data, raw.data, frame.dlc);
+        frame.id = can_id & CAN_SFF_MASK; /* this project only uses 11-bit standard IDs */
+        frame.dlc = (payload_len > CAN_MAX_DLC) ? CAN_MAX_DLC : payload_len;
+        memcpy(frame.data, payload_data, frame.dlc);
 
         osal_mutex_lock(g_sub_lock);
         subscriber_t local_subs[MAX_SUBSCRIBERS];
@@ -90,6 +123,12 @@ static void rx_task_main(void *arg) {
 int can_hal_init(void) {
     g_sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (g_sock < 0) return -1;
+
+    /* Without this, the socket only accepts/delivers classic struct
+       can_frame -- any write() of a struct canfd_frame (CELL_VOLTAGES,
+       once BMS_CELL_COUNT > 4) would be rejected outright. */
+    int enable_fd = 1;
+    setsockopt(g_sock, SOL_CAN_RAW, CAN_RAW_FD_FRAMES, &enable_fd, sizeof(enable_fd));
 
     const char *iface = getenv("BMS_CAN_IFACE");
     if (!iface) iface = DEFAULT_CAN_IFACE;
@@ -139,10 +178,21 @@ int can_hal_subscribe(can_rx_callback_t cb, void *ctx) {
 int can_hal_send(const can_frame_t *frame) {
     if (!frame || frame->dlc > CAN_MAX_DLC || g_sock < 0) return -1;
 
-    struct can_frame raw;
+    if (frame->dlc <= CLASSIC_CAN_MAX_LEN) {
+        struct can_frame raw;
+        memset(&raw, 0, sizeof(raw));
+        raw.can_id = frame->id & CAN_SFF_MASK; /* standard frame: no EFF/RTR/ERR flag bits */
+        raw.can_dlc = frame->dlc;
+        memcpy(raw.data, frame->data, frame->dlc);
+
+        ssize_t n = write(g_sock, &raw, sizeof(raw));
+        return (n == (ssize_t)sizeof(raw)) ? 0 : -1;
+    }
+
+    struct canfd_frame raw;
     memset(&raw, 0, sizeof(raw));
-    raw.can_id = frame->id & CAN_SFF_MASK; /* standard frame: no EFF/RTR/ERR flag bits */
-    raw.can_dlc = frame->dlc;
+    raw.can_id = frame->id & CAN_SFF_MASK;
+    raw.len = frame->dlc;
     memcpy(raw.data, frame->data, frame->dlc);
 
     ssize_t n = write(g_sock, &raw, sizeof(raw));

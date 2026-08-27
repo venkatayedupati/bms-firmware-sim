@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "can_hal.h"
+#include "../bms/bms_config.h"
 
 /*
  * Message layout for this ECU node. Documented in full, DBC-style, in
@@ -14,9 +15,9 @@
 /* IDs are chosen so lowest-ID-wins CAN arbitration favors the
    safety-critical fault message over routine telemetry if both are ever
    pending at once. */
-#define CAN_ID_FAULT_REPORT   0x080u  /* TX, on-change: active fault bitmask (highest priority) */
+#define CAN_ID_FAULT_REPORT   0x080u  /* TX, on-change: active fault bitmask + ISO 26262-style severity (highest priority) */
 #define CAN_ID_BMS_STATUS     0x100u  /* TX, 100ms: pack voltage/current/SoC/state */
-#define CAN_ID_CELL_VOLTAGES  0x101u  /* TX, 100ms: 4 cell voltages, mV */
+#define CAN_ID_CELL_VOLTAGES  0x101u  /* TX, 100ms: BMS_CELL_COUNT cell voltages, mV -- CAN-FD (needs more than 8 bytes once BMS_CELL_COUNT > 4) */
 #define CAN_ID_CHARGE_COMMAND 0x200u  /* RX: requested charge current, 0.1A units */
 
 typedef enum {
@@ -34,11 +35,13 @@ typedef struct {
 } bms_status_t;
 
 typedef struct {
-    uint16_t cell_mv[4];
+    uint16_t cell_mv[BMS_CELL_COUNT];
 } cell_voltages_t;
 
 typedef struct {
     uint16_t fault_bitmask;
+    uint8_t  severity; /* bms_asil_t (see fault_manager.h): worst ISO
+                           26262-style severity among active_faults */
 } fault_report_t;
 
 typedef struct {

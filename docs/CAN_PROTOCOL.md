@@ -7,8 +7,11 @@ scale/offset conventions below are exactly what a `.dbc` would encode.
 
 **Byte order:** big-endian for every multi-byte signal.
 **Fixed point only:** no floats cross the wire — every signal is an integer
-with a documented scale, matching real automotive DBC practice (a CAN frame
-has 8 bytes; floats waste precision and complicate cross-vendor tooling).
+with a documented scale, matching real automotive DBC practice.
+**Classic CAN and CAN-FD both:** BMS_STATUS, FAULT_REPORT, and
+CHARGE_COMMAND are all 8 bytes or fewer and work on either; CELL_VOLTAGES
+needs CAN-FD's larger payload once `BMS_CELL_COUNT` (currently 5) pushes it
+past 8 bytes — see that message's own entry below.
 
 ## Messages
 
@@ -31,30 +34,45 @@ DLC: 6.
 | 2-3 | cell_2_mv | uint16 | 1 mV | Cell 2 voltage |
 | 4-5 | cell_3_mv | uint16 | 1 mV | Cell 3 voltage |
 | 6-7 | cell_4_mv | uint16 | 1 mV | Cell 4 voltage |
+| 8-9 | cell_5_mv | uint16 | 1 mV | Cell 5 voltage |
 
-DLC: 8. (A real pack with more cells would need multiplexed frames or
-CAN-FD; this demo hardcodes a 4S pack to keep the wire format simple — see
-`docs/ARCHITECTURE.md` "Future work".)
+DLC: `BMS_CELL_COUNT * 2` = 10 (currently). This is the one message in this
+protocol that's genuinely CAN-FD-only: classic CAN's 8-byte frame limit fit
+a 4S pack exactly, but a 5th cell pushes it to 10 bytes. `can_hal_socketcan.c`
+sends this as a real `struct canfd_frame`, not `struct can_frame`; see
+`docs/ARCHITECTURE.md` "Portability". A pack larger still than CAN-FD's own
+64-byte max would need multiplexed frames instead — out of scope here, since
+64 bytes covers a 32-cell pack, well beyond what a 5S demo needs to prove.
 
 ### `0x080` FAULT_REPORT — TX, on change only
 
 | Bytes | Signal | Type | Meaning |
 |-------|--------|------|---------|
 | 0-1 | fault_bitmask | uint16 | Bitmask, see below |
+| 2 | severity | uint8 | `bms_asil_t` (see `src/bms/fault_manager.h`): worst ISO 26262-style severity among the active faults |
 
-DLC: 2. Sent only when the bitmask changes, not on a fixed period — a fault
+DLC: 3. Sent only when the bitmask changes, not on a fixed period — a fault
 report is an event, not telemetry, and flooding the bus with an unchanged
 value would waste bandwidth other ECUs need.
 
-`fault_bitmask` bits (`src/can/can_protocol.h`):
+`fault_bitmask` bits (`src/can/can_protocol.h`), each with its own ISO
+26262-style severity (`src/bms/fault_manager.c`'s `FAULT_SEVERITIES` table —
+a real hazard analysis would derive these from severity/exposure/
+controllability per failure mode, not just assign one level to "the BMS"):
 
-| Bit | Name | Set when |
-|-----|------|----------|
-| 0 | OVERVOLTAGE | Any cell ≥ 4200 mV |
-| 1 | UNDERVOLTAGE | Any cell ≤ 3000 mV |
-| 2 | OVERTEMP | Any cell ≥ 60°C |
-| 3 | CELL_IMBALANCE | max(cell) − min(cell) ≥ 150 mV |
-| 4 | TASK_WATCHDOG | A task heartbeat went stale (firmware-internal fault, not a cell condition) |
+| Bit | Name | Set when | Severity | Why |
+|-----|------|----------|----------|-----|
+| 0 | OVERVOLTAGE | Any cell ≥ 4200 mV | `BMS_ASIL_D` | Thermal runaway risk |
+| 1 | UNDERVOLTAGE | Any cell ≤ 3000 mV | `BMS_ASIL_C` | Over-discharge cell damage, less acutely dangerous |
+| 2 | OVERTEMP | Any cell ≥ 60°C | `BMS_ASIL_D` | Thermal runaway risk |
+| 3 | CELL_IMBALANCE | max(cell) − min(cell) ≥ 150 mV | `BMS_ASIL_B` | Longevity/efficiency concern, gradual |
+| 4 | TASK_WATCHDOG | A task heartbeat went stale (firmware-internal fault, not a cell condition) | `BMS_ASIL_D` | Loss of the fault monitor itself — treated at least as seriously as the worst hazard it guards against |
+
+`severity` is the *worst* level among every bit currently set, not a sum or
+the first one found — see `fault_manager_get_severity()`. A single
+`BMS_ASIL_D` fault also skips the fault state machine's usual 3-strikes
+latch window entirely and trips `BMS_STATE_SHUTDOWN` on its first
+occurrence; see `docs/ARCHITECTURE.md` "Fault state machine".
 
 ### `0x200` CHARGE_COMMAND — RX
 

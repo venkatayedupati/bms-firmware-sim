@@ -1,5 +1,6 @@
 #include "test.h"
 #include "../src/can/can_protocol.h"
+#include "../src/bms/fault_manager.h" /* bms_asil_t (BMS_ASIL_D etc.) */
 #include <string.h>
 
 static void test_status_roundtrip(void) {
@@ -19,20 +20,27 @@ static void test_status_roundtrip(void) {
 }
 
 static void test_cell_voltages_roundtrip(void) {
-    cell_voltages_t in = { .cell_mv = {3650, 3700, 3695, 3712} };
+    /* BMS_CELL_COUNT is 5 (see bms_config.h): this frame is 10 bytes,
+       genuinely over classic CAN's 8-byte limit -- this round-trip test
+       is itself confirmation that CAN_MAX_DLC's CAN-FD-sized payload
+       (see can_hal.h) is actually exercised, not just declared. */
+    cell_voltages_t in = { .cell_mv = {3650, 3700, 3695, 3712, 3680} };
     can_frame_t frame;
     can_protocol_pack_cell_voltages(&in, &frame);
+    TEST_ASSERT_EQ_INT(BMS_CELL_COUNT * 2, frame.dlc,
+                        "cell voltages frame is sized for BMS_CELL_COUNT cells, not a fixed 8 bytes");
 
     cell_voltages_t out;
     int rc = can_protocol_unpack_cell_voltages(&frame, &out);
     TEST_ASSERT_EQ_INT(0, rc, "cell voltages unpack succeeds");
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < BMS_CELL_COUNT; i++) {
         TEST_ASSERT_EQ_INT(in.cell_mv[i], out.cell_mv[i], "cell voltage round-trips");
     }
 }
 
 static void test_fault_report_roundtrip(void) {
-    fault_report_t in = { .fault_bitmask = FAULT_BIT_OVERVOLTAGE | FAULT_BIT_OVERTEMP };
+    fault_report_t in = { .fault_bitmask = FAULT_BIT_OVERVOLTAGE | FAULT_BIT_OVERTEMP,
+                           .severity = BMS_ASIL_D };
     can_frame_t frame;
     can_protocol_pack_fault(&in, &frame);
 
@@ -40,6 +48,7 @@ static void test_fault_report_roundtrip(void) {
     int rc = can_protocol_unpack_fault(&frame, &out);
     TEST_ASSERT_EQ_INT(0, rc, "fault report unpack succeeds");
     TEST_ASSERT_EQ_INT(in.fault_bitmask, out.fault_bitmask, "fault bitmask round-trips");
+    TEST_ASSERT_EQ_INT(in.severity, out.severity, "severity round-trips");
 }
 
 static void test_unpack_rejects_wrong_id(void) {
@@ -57,11 +66,15 @@ static void test_unpack_rejects_short_dlc(void) {
     can_frame_t frame;
     memset(&frame, 0, sizeof(frame));
     frame.id = CAN_ID_CELL_VOLTAGES;
-    frame.dlc = 4; /* needs 8 bytes for four cells */
+    /* 8 bytes is classic CAN's own max DLC -- using it here (rather than
+       an arbitrary small number) shows this isn't just "too short", it's
+       specifically not enough anymore now that BMS_CELL_COUNT is 5
+       (needs BMS_CELL_COUNT*2=10 bytes). */
+    frame.dlc = 8;
 
     cell_voltages_t out;
     int rc = can_protocol_unpack_cell_voltages(&frame, &out);
-    TEST_ASSERT_EQ_INT(-1, rc, "unpack rejects a frame that is too short");
+    TEST_ASSERT_EQ_INT(-1, rc, "unpack rejects a frame that is too short for BMS_CELL_COUNT cells");
 }
 
 static void test_charge_command_unpack(void) {

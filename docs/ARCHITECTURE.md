@@ -66,7 +66,8 @@ a slower, steadier estimate is fine and reduces CAN bus load.
    │WARNING │  OK for            └───┬───┘
    └────────┘  FAULT_DEBOUNCE_MS     │
                                      │ 3rd FAULT entry within
-                                     │ FAULT_LATCH_WINDOW_MS
+                                     │ FAULT_LATCH_WINDOW_MS,
+                                     │ OR a single BMS_ASIL_D fault
                                      ▼
                               ┌──────────┐
                               │ SHUTDOWN │  (latched — no auto-recovery,
@@ -84,13 +85,25 @@ a slower, steadier estimate is fine and reduces CAN bus load.
 - **Recovery** out of FAULT requires `FAULT_DEBOUNCE_MS` of continuously OK
   readings — this is standard hysteresis, and it exists so a reading that
   flickers exactly at a threshold doesn't chatter the state on every cycle.
-- **SHUTDOWN is latched.** Three separate FAULT episodes within
-  `FAULT_LATCH_WINDOW_MS` means the pack is unstable, not just unlucky once
-  — the firmware stops trying to self-recover and requires an external
-  reset, mirroring how real packs escalate to requiring a service tool.
+  A fault whose severity trips immediate SHUTDOWN (below) never reaches
+  this path at all.
+- **SHUTDOWN is latched**, reached two ways. The general path: three
+  separate FAULT episodes within `FAULT_LATCH_WINDOW_MS` means the pack is
+  unstable, not just unlucky once — the firmware stops trying to
+  self-recover and requires an external reset, mirroring how real packs
+  escalate to requiring a service tool. The severity-driven path: a single
+  `BMS_ASIL_D` fault (overvoltage/overtemp — thermal runaway risk — or a
+  watchdog timeout, i.e. losing the fault monitor itself) skips the
+  3-strikes count entirely and latches SHUTDOWN on its very first
+  occurrence. Real ISO 26262 practice doesn't give the most severe hazards
+  a grace period, and a severity classification that didn't actually
+  change any behavior would just be a decorative label on the CAN bus —
+  see `bms_asil_t` and `FAULT_SEVERITIES` in `src/bms/fault_manager.c`
+  for the full per-fault-type severity table and reasoning.
 
 Implementation: `src/bms/fault_manager.c`. Test coverage for every edge of
-this diagram, including the 3-strikes latch: `test/test_fault_manager.c`.
+this diagram, including both paths to SHUTDOWN and the severity
+classification itself: `test/test_fault_manager.c`.
 
 ## Portability
 
@@ -186,6 +199,21 @@ fan-out (matching the virtual bus's contract) is done in a background
 reader thread that dispatches each received frame to every registered
 callback, mirroring the virtual bus's own broadcast semantics.
 
+It's CAN-FD aware, not just classic CAN, since CELL_VOLTAGES needs more
+than 8 bytes once `BMS_CELL_COUNT > 4` (see `docs/CAN_PROTOCOL.md`) — a
+real `struct canfd_frame`, not `struct can_frame`, is the only thing that
+can carry that on the wire. `can_hal_init` enables `CAN_RAW_FD_FRAMES` on
+the socket; without it the socket would reject any `write()` of a
+`canfd_frame` outright. Sending: a frame of 8 bytes or fewer still goes out
+as a classic `struct can_frame` (interoperates with non-FD-aware
+listeners); anything larger goes out as `struct canfd_frame`. Receiving:
+SocketCAN delivers either frame type on the same `read()`, sized according
+to what actually arrived, so the reader thread reads into the larger
+`canfd_frame` buffer and dispatches on the returned byte count
+(`CAN_MTU` vs `CANFD_MTU`) — the standard pattern documented in the
+kernel's own `Documentation/networking/can.rst` and used by can-utils'
+`candump`.
+
 **There is no fully-automatic environment that can prove this works against
 a real vcan0, and that's a real platform limitation, not a documentation
 gap.** Verified directly on both places this could plausibly run:
@@ -218,7 +246,11 @@ BMS_CAN_IFACE=vcan0 make run-socketcan          # in another (or: ./build-socket
 ```
 
 You should see real `BMS_STATUS` (`100#...`) and `CELL_VOLTAGES`
-(`101#...`) frames appear in `candump`'s output every 100ms.
+(`101##...`) frames appear in `candump`'s output every 100ms — the extra
+`#` on CELL_VOLTAGES is candump's own marker that it arrived as a CAN-FD
+frame, since at 10 bytes (`BMS_CELL_COUNT * 2`) it no longer fits a
+classic frame; BMS_STATUS still shows a single `#`, since at 6 bytes it
+goes out classic.
 
 ### What's intentionally *not* abstracted
 
@@ -230,6 +262,7 @@ payoff, which is why it's a direct, swappable module instead of a HAL.
 
 ## Future work (see also README "Roadmap")
 
-- CAN-FD and larger pack sizes (this demo hardcodes a 4S pack for clarity).
-- ISO 26262-style fault severity/ASIL classification instead of a flat
-  bitmask.
+Real ADC-driven cell sensing on physical STM32/ESP32 hardware is the one
+item left — it needs physical hardware this project doesn't have access
+to, unlike everything else on the original roadmap (FreeRTOS on QEMU,
+SocketCAN, CAN-FD, ISO 26262-style fault severity), which is done.

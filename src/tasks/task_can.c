@@ -26,6 +26,7 @@ void task_can_main(void *arg) {
         bms_status_t status = ctx->status;
         cell_reading_t reading = ctx->latest_reading;
         uint16_t faults = ctx->fault_mgr.active_faults;
+        bms_asil_t severity = ctx->fault_mgr.severity;
         osal_mutex_unlock(ctx->lock);
 
         can_frame_t frame;
@@ -33,20 +34,17 @@ void task_can_main(void *arg) {
         can_protocol_pack_status(&status, &frame);
         can_hal_send(&frame);
 
+        /* cv.cell_mv and reading.cell_mv are both BMS_CELL_COUNT-sized now
+           (cell_voltages_t used to be a fixed 4 slots, independent of
+           BMS_CELL_COUNT -- see git history), so this is a plain copy, no
+           bounds mismatch to guard against. */
         cell_voltages_t cv;
-        /* cv.cell_mv is a fixed 4-slot wire-format array (see
-           docs/CAN_PROTOCOL.md); reading.cell_mv is BMS_CELL_COUNT-sized,
-           currently also 4 but the documented next step if the pack grows.
-           The "&& i < 4" bound is a real guard against overflowing cv on
-           that day, not dead code -- it's just redundant *today*, which is
-           exactly what the suppressed check is (correctly) noticing. */
-        // cppcheck-suppress knownConditionTrueFalse
-        for (int i = 0; i < BMS_CELL_COUNT && i < 4; i++) cv.cell_mv[i] = reading.cell_mv[i];
+        for (int i = 0; i < BMS_CELL_COUNT; i++) cv.cell_mv[i] = reading.cell_mv[i];
         can_protocol_pack_cell_voltages(&cv, &frame);
         can_hal_send(&frame);
 
         if (faults != last_faults) {
-            fault_report_t fr = { .fault_bitmask = faults };
+            fault_report_t fr = { .fault_bitmask = faults, .severity = (uint8_t)severity };
             can_protocol_pack_fault(&fr, &frame);
             can_hal_send(&frame);
             last_faults = faults;

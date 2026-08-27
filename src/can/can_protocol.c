@@ -32,15 +32,15 @@ int can_protocol_unpack_status(const can_frame_t *in, bms_status_t *out) {
 void can_protocol_pack_cell_voltages(const cell_voltages_t *cv, can_frame_t *out) {
     memset(out, 0, sizeof(*out));
     out->id = CAN_ID_CELL_VOLTAGES;
-    out->dlc = 8;
-    for (size_t i = 0; i < 4; i++) {
+    out->dlc = BMS_CELL_COUNT * 2; /* > 8 once BMS_CELL_COUNT > 4 -- needs CAN-FD, see can_hal.h */
+    for (size_t i = 0; i < BMS_CELL_COUNT; i++) {
         put_u16(&out->data[i * 2], cv->cell_mv[i]);
     }
 }
 
 int can_protocol_unpack_cell_voltages(const can_frame_t *in, cell_voltages_t *out) {
-    if (in->id != CAN_ID_CELL_VOLTAGES || in->dlc < 8) return -1;
-    for (size_t i = 0; i < 4; i++) {
+    if (in->id != CAN_ID_CELL_VOLTAGES || in->dlc < BMS_CELL_COUNT * 2) return -1;
+    for (size_t i = 0; i < BMS_CELL_COUNT; i++) {
         out->cell_mv[i] = get_u16(&in->data[i * 2]);
     }
     return 0;
@@ -49,13 +49,15 @@ int can_protocol_unpack_cell_voltages(const can_frame_t *in, cell_voltages_t *ou
 void can_protocol_pack_fault(const fault_report_t *f, can_frame_t *out) {
     memset(out, 0, sizeof(*out));
     out->id = CAN_ID_FAULT_REPORT;
-    out->dlc = 2;
+    out->dlc = 3;
     put_u16(&out->data[0], f->fault_bitmask);
+    out->data[2] = f->severity;
 }
 
 int can_protocol_unpack_fault(const can_frame_t *in, fault_report_t *out) {
-    if (in->id != CAN_ID_FAULT_REPORT || in->dlc < 2) return -1;
+    if (in->id != CAN_ID_FAULT_REPORT || in->dlc < 3) return -1;
     out->fault_bitmask = get_u16(&in->data[0]);
+    out->severity = in->data[2];
     return 0;
 }
 

@@ -1,8 +1,11 @@
 #ifndef BMS_CONFIG_H
 #define BMS_CONFIG_H
 
-/* Pack configuration: 4S (four cells in series), simulated. */
-#define BMS_CELL_COUNT 4
+/* Pack configuration: 5S (five cells in series), simulated. Was 4S; bumped
+   specifically so CELL_VOLTAGES (2 bytes/cell) exceeds classic CAN's 8-byte
+   frame limit (5*2=10 bytes) and genuinely needs CAN-FD's larger payload,
+   rather than CAN-FD support being decorative. See docs/CAN_PROTOCOL.md. */
+#define BMS_CELL_COUNT 5
 
 #define BMS_CELL_NOMINAL_MV      3700
 #define BMS_CELL_OVERVOLTAGE_MV  4200

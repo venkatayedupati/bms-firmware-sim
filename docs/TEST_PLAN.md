@@ -10,7 +10,7 @@ the simulator itself and observing correct behavior end to end, since
 timing-dependent concurrent behavior is a poor fit for deterministic unit
 assertions.
 
-58 tests, all passing, run with `make test`, no external framework or
+74 tests, all passing, run with `make test`, no external framework or
 network access required (`test/test.h` is a ~30-line macro shim).
 
 ## Sanitizers
@@ -74,13 +74,16 @@ suppressed: a dead variable initializer in `osal_queue_send`/
 `osal_queue_receive` (`rc`'s initial value was always overwritten before
 being read), and an `int` array index in `can_protocol.c`'s cell-voltage
 pack/unpack widened implicitly to a pointer offset — harmless given the
-loop only ever runs 0..3, but `size_t` is the correct type for an array
-index regardless. One cppcheck finding was suppressed instead of fixed: a
-"condition is always true" in `task_can.c`'s cell-voltage loop bound
-(`i < BMS_CELL_COUNT && i < 4`) is correct *today* only because
-`BMS_CELL_COUNT` is 4; the redundant `&& i < 4` is a deliberate guard
-against the documented 5th-cell extension overflowing the CAN wire
-format's fixed 4-slot array, not dead code.
+loop only ever ran 0..3 at the time, but `size_t` is the correct type for
+an array index regardless. (A third finding from that same pass —
+`task_can.c`'s `i < BMS_CELL_COUNT && i < 4` cell-voltage loop bound being
+flagged as "condition is always true" — was suppressed rather than fixed,
+since it was a deliberate guard against `cell_voltages_t`'s then-fixed
+4-slot wire array overflowing once the pack grew past 4 cells. Once that
+growth actually happened (`BMS_CELL_COUNT` is 5 now, `cell_voltages_t` is
+`BMS_CELL_COUNT`-sized instead of fixed at 4), the guard's whole reason to
+exist went away and it was deleted outright rather than left suppressed —
+the doc it was pointing at eventually catching up with itself.)
 
 ## Code coverage
 
@@ -162,33 +165,47 @@ filter whose whole point is blending two noisy signals.
 
 ### `fault_manager` (`test/test_fault_manager.c`)
 
-Walks the full state diagram in `docs/ARCHITECTURE.md`:
+Walks the full state diagram in `docs/ARCHITECTURE.md`, using a
+`BMS_ASIL_C` fault (undervoltage) for every test of the *ordinary*
+FAULT/debounce/3-strikes path, specifically because `BMS_ASIL_D` faults
+(overvoltage, overtemp, watchdog) no longer take that path at all — see
+below:
 
-- Nominal readings stay in NORMAL.
-- A hard limit violation (overvoltage) trips FAULT on the very next
+- Nominal readings stay in NORMAL (and are `BMS_ASIL_QM`: no active faults).
+- A hard limit violation (undervoltage) trips FAULT on the very next
   evaluation — no debounce going in.
 - A single OK reading does **not** clear FAULT (debounce required); a full
   `FAULT_DEBOUNCE_MS` of continuous OK readings does.
-- Three separate FAULT episodes inside `FAULT_LATCH_WINDOW_MS` latch the
-  state machine into SHUTDOWN — this is the test most worth reading, since
-  it's the subtlest behavior in the codebase (timestamps are chosen by hand
-  to land exactly on both sides of the debounce and latch-window
-  boundaries).
+- Three separate undervoltage episodes inside `FAULT_LATCH_WINDOW_MS` latch
+  the state machine into SHUTDOWN — this is the test most worth reading for
+  the *ordinary* latch path, since it's the subtlest behavior in that path
+  (timestamps are chosen by hand to land exactly on both sides of the
+  debounce and latch-window boundaries).
 - SHUTDOWN, once entered, does not clear on subsequent OK readings (latched
-  by design).
-- A watchdog-reported fault behaves like a hard fault for state-machine
-  purposes (trips FAULT, respects its own debounce window before allowing
-  recovery).
+  by design), regardless of which path reached it.
+- A single overvoltage event (`BMS_ASIL_D`) trips SHUTDOWN on its very
+  first evaluation, skipping the 3-strikes latch window entirely — the
+  actual behavioral point of classifying fault severity at all, not just a
+  label. A single watchdog report (also `BMS_ASIL_D`) does the same.
+- `fault_manager_get_severity()` tested directly: each fault bit's
+  individual severity, and that combining multiple bits yields the *worst*
+  one, not the first or a sum.
 
 ### `can_protocol` (`test/test_can_protocol.c`)
 
 - Round-trip pack→unpack for every message type (STATUS, CELL_VOLTAGES,
   FAULT_REPORT, CHARGE_COMMAND), checking every field survives the wire
   encoding — including a signed field (`pack_current_ca`) to catch sign-
-  extension bugs specifically.
+  extension bugs specifically, and (for FAULT_REPORT) the `severity` byte
+  added alongside `fault_bitmask`.
+- CELL_VOLTAGES packs to `BMS_CELL_COUNT * 2` bytes (10, currently) — this
+  round-trip test is itself confirmation that `can_hal.h`'s CAN-FD-sized
+  payload is actually exercised by this message, not just declared.
 - Unpack rejects a frame with the wrong CAN ID.
 - Unpack rejects a frame with too short a DLC rather than reading past the
-  end of `data[]`.
+  end of `data[]` — for CELL_VOLTAGES, specifically a `dlc` of 8 (classic
+  CAN's own max), confirming that even a full classic-sized frame isn't
+  enough once `BMS_CELL_COUNT` is 5.
 
 ## What's not unit tested (and why)
 

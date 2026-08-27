@@ -17,6 +17,37 @@ static int latch_should_trip(const fault_manager_t *fm, uint32_t now_ms) {
     return (now_ms - oldest) <= FAULT_LATCH_WINDOW_MS;
 }
 
+/* Per-fault-type ISO 26262-style severity. Overvoltage/overtemp: thermal
+   runaway risk, the headline BMS hazard. Undervoltage: over-discharge cell
+   damage, real but less acutely dangerous. Cell imbalance: a longevity/
+   efficiency concern, gradual, the least severe hard fault here. Task
+   watchdog: loss of the fault monitor itself -- ISO 26262 treats losing a
+   safety mechanism at least as seriously as the worst hazard it guards
+   against, hence the same top severity as the thermal faults. */
+typedef struct {
+    uint16_t bit;
+    bms_asil_t severity;
+} fault_severity_entry_t;
+
+static const fault_severity_entry_t FAULT_SEVERITIES[] = {
+    { FAULT_BIT_OVERVOLTAGE,    BMS_ASIL_D },
+    { FAULT_BIT_OVERTEMP,       BMS_ASIL_D },
+    { FAULT_BIT_TASK_WATCHDOG,  BMS_ASIL_D },
+    { FAULT_BIT_UNDERVOLTAGE,   BMS_ASIL_C },
+    { FAULT_BIT_CELL_IMBALANCE, BMS_ASIL_B },
+};
+#define FAULT_SEVERITIES_LEN (sizeof(FAULT_SEVERITIES) / sizeof(FAULT_SEVERITIES[0]))
+
+bms_asil_t fault_manager_get_severity(uint16_t active_faults) {
+    bms_asil_t worst = BMS_ASIL_QM;
+    for (size_t i = 0; i < FAULT_SEVERITIES_LEN; i++) {
+        if ((active_faults & FAULT_SEVERITIES[i].bit) && FAULT_SEVERITIES[i].severity > worst) {
+            worst = FAULT_SEVERITIES[i].severity;
+        }
+    }
+    return worst;
+}
+
 void fault_manager_init(fault_manager_t *fm) {
     memset(fm, 0, sizeof(*fm));
     fm->state = BMS_STATE_NORMAL;
@@ -65,13 +96,18 @@ void fault_manager_evaluate(fault_manager_t *fm, const cell_reading_t *reading,
                            (now_ms < fm->watchdog_fault_until_ms);
     uint16_t total_faults = hard_faults | (watchdog_active ? FAULT_BIT_TASK_WATCHDOG : 0);
     fm->active_faults = total_faults;
+    fm->severity = fault_manager_get_severity(total_faults);
 
     if (total_faults != 0) {
         if (fm->state != BMS_STATE_FAULT) {
             record_fault_entry(fm, now_ms);
             fm->state = BMS_STATE_FAULT;
         }
-        if (latch_should_trip(fm, now_ms)) {
+        /* A single BMS_ASIL_D fault trips SHUTDOWN immediately, bypassing
+           the 3-strikes latch window entirely -- the most severe hazards
+           here (thermal runaway risk, or having lost the fault monitor
+           itself) don't get a second chance before requiring service. */
+        if (fm->severity >= BMS_ASIL_D || latch_should_trip(fm, now_ms)) {
             fm->state = BMS_STATE_SHUTDOWN;
         }
         fm->last_ok_tick_ms = 0;
@@ -92,12 +128,15 @@ void fault_manager_report_watchdog_fault(fault_manager_t *fm, uint32_t now_ms) {
 
     fm->watchdog_fault_until_ms = now_ms + FAULT_DEBOUNCE_MS;
     fm->active_faults |= FAULT_BIT_TASK_WATCHDOG;
+    fm->severity = fault_manager_get_severity(fm->active_faults);
 
     if (fm->state != BMS_STATE_FAULT) {
         record_fault_entry(fm, now_ms);
         fm->state = BMS_STATE_FAULT;
     }
-    if (latch_should_trip(fm, now_ms)) {
+    /* FAULT_BIT_TASK_WATCHDOG is BMS_ASIL_D (see FAULT_SEVERITIES above):
+       losing the fault monitor itself never gets a second chance either. */
+    if (fm->severity >= BMS_ASIL_D || latch_should_trip(fm, now_ms)) {
         fm->state = BMS_STATE_SHUTDOWN;
     }
 }

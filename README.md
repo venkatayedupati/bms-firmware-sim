@@ -1,7 +1,7 @@
 # BMS Firmware Simulator
 
 A simulated automotive **Battery Management System (BMS)** ECU node: it
-monitors a 4-cell pack, estimates State of Charge with a Kalman filter,
+monitors a 5-cell pack, estimates State of Charge with a Kalman filter,
 runs a fault-detection state machine, and reports over a CAN bus —
 architected as real vehicle firmware would be, but runs entirely on a
 laptop with **no hardware, no kernel modules, and no external
@@ -40,7 +40,7 @@ Five things distinguish it from a typical embedded portfolio project:
    GitHub's hosted Linux runner can provide. See
    [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#portability) for exactly
    what was checked on each.
-3. **It's tested, not just demoed.** 58 unit tests cover the SoC math, every
+3. **It's tested, not just demoed.** 74 unit tests cover the SoC math, every
    fault-state transition (including the fault-latch-to-SHUTDOWN path), and
    CAN frame packing/unpacking — see [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md).
 4. **It's checked for the bug class that actually matters here.** Five
@@ -96,7 +96,7 @@ of the box on macOS and Linux; no cmake, no package manager, no
 submodules).
 
 ```sh
-make test         # build and run all 58 unit tests
+make test         # build and run all 74 unit tests
 make run          # build and run the simulator, nominal scenario, 8s
 make run SCENARIO=overvoltage   # inject a fault scenario
 make sanitize      # build + run the sim and tests under TSan, ASan, and UBSan
@@ -129,15 +129,19 @@ scenario, expect something like:
 
 ```
 [     0 ms] INFO  sensor   task started (period=100ms)
-[    52 ms] WARN  fault    state change -> 2 (active_faults=0x0009)
+[     0 ms] WARN  fault    state change -> 3 (active_faults=0x0009)
 ...
 === Final status ===
-pack_voltage_mv=15200 pack_current_ca=-200 soc=99.4% state=2 active_faults=0x0009
+pack_voltage_mv=19022 pack_current_ca=-200 soc=98.5% state=3 active_faults=0x0009
 ```
 
-`state=2` is `BMS_STATE_FAULT`; `active_faults` is a bitmask (see
+`state=3` is `BMS_STATE_SHUTDOWN`; `active_faults` is a bitmask (see
 `src/can/can_protocol.h`) — `0x0009` here decodes to overvoltage (bit 0) plus
 the cell imbalance that overvoltage on one cell necessarily causes (bit 3).
+Overvoltage is `BMS_ASIL_D` (see `docs/ARCHITECTURE.md` "Fault state
+machine"), so this scenario now latches straight to SHUTDOWN on the very
+first evaluation instead of passing through `BMS_STATE_FAULT` first — a
+lower-severity fault (e.g. cell imbalance alone) still would.
 
 ## Project layout
 
@@ -152,14 +156,14 @@ targets/
   qemu_mps2_an385/  Board support (linker script, startup, UART) for the FreeRTOS/QEMU port
 third_party/
   FreeRTOS-Kernel/  Vendored FreeRTOS kernel (git submodule)
-test/       58 dependency-free unit tests (no external test framework)
+test/       74 dependency-free unit tests (no external test framework)
 docs/       Architecture, CAN protocol spec, test plan
 ```
 
 ## Roadmap / what a v2 would add
 
 - Real ADC-driven cell sensing on physical STM32/ESP32 hardware — the
-  FreeRTOS port to QEMU is done and verified; this is specifically the
-  "on real silicon, with a real AFE" step beyond that, which needs
-  physical hardware this project doesn't have access to.
-- CAN-FD support and ISO 26262-style fault severity classification.
+  FreeRTOS port to QEMU is done and verified, CAN-FD and ISO 26262-style
+  fault severity are done too; this is specifically the "on real silicon,
+  with a real AFE" step beyond all of that, which needs physical hardware
+  this project doesn't have access to.
