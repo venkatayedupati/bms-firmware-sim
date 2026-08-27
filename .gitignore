@@ -3,7 +3,13 @@ build-tsan/
 build-asan/
 build-coverage/
 build-socketcan/
+build-fuzz/
 targets/qemu_mps2_an385/build/
+fuzz/corpus/
+crash-*
+oom-*
+timeout-*
+leak-*
 *.o
 *.dSYM/
 .DS_Store

@@ -48,6 +48,16 @@ jobs:
           cppcheck --enable=warning,performance,portability,style --std=c11 -Isrc \
             --suppress=missingIncludeSystem --inline-suppr --error-exitcode=1 \
             src/can/can_hal_socketcan.c
+      # fuzz/fuzz_can_protocol.c isn't in SIM_SRCS/TEST_SRCS either (it only
+      # compiles with a libFuzzer-capable clang), same reasoning as the
+      # SocketCAN file above.
+      - name: clang-tidy (fuzz harness)
+        run: clang-tidy fuzz/fuzz_can_protocol.c -- -std=c11 -Isrc
+      - name: cppcheck (fuzz harness)
+        run: |
+          cppcheck --enable=warning,performance,portability,style --std=c11 -Isrc \
+            --suppress=missingIncludeSystem --inline-suppr --error-exitcode=1 \
+            fuzz/fuzz_can_protocol.c
 
   coverage:
     runs-on: ubuntu-latest
@@ -83,6 +93,23 @@ jobs:
           lcov --version
       - name: Run tests with coverage instrumentation and report
         run: make coverage
+
+  fuzz:
+    # can_protocol.c's unpack_* functions are the one place in this codebase
+    # that parses attacker/peer-controlled bytes (whatever id/dlc/data a
+    # real bus frame carried) -- see fuzz/fuzz_can_protocol.c. Ubuntu's
+    # plain `clang` apt package bundles libFuzzer's compiler-rt runtime
+    # fine (verified directly); Apple's Command Line Tools clang on macOS
+    # does not, which is why FUZZ_CC defaults to Homebrew's LLVM there
+    # instead -- this job overrides it back to plain `clang` on this
+    # runner. 120s is a fixed CI budget, not a real fuzzing campaign length.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang
+      - name: Fuzz can_protocol.c's unpack functions (120s budget)
+        run: make fuzz-run FUZZ_CC=clang FUZZ_TIME=120
 
   socketcan-build:
     # Compile/link verification only. Live functional testing against a

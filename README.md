@@ -54,6 +54,14 @@ Five things distinguish it from a typical embedded portfolio project:
    with lcov (`make coverage`) — every suppressed check in `.clang-tidy` has
    a one-line reason (a false positive on this platform, or a check that
    fights a deliberate convention), not a blanket disable.
+6. **The one place that parses untrusted bytes is fuzzed, not just unit
+   tested.** `can_protocol.c`'s `unpack_*` functions are what a real
+   `CAN_RAW` socket hands attacker/peer-controlled `id`/`dlc`/`data` to;
+   `make fuzz-run` runs a libFuzzer harness against them under
+   ASan/UBSan (`fuzz/fuzz_can_protocol.c`, also in CI). Zero crashes across
+   tens of millions of runs — see
+   [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md#fuzzing) for why that's the
+   expected result given the code, not fuzzing doing nothing.
 
 ## Architecture at a glance
 
@@ -103,6 +111,7 @@ make sanitize      # build + run the sim and tests under TSan, ASan, and UBSan
 make tidy          # clang-tidy (requires LLVM; see CLANG_TIDY in the Makefile)
 make cppcheck-run  # cppcheck
 make coverage      # build + run tests with coverage instrumentation, print report
+make fuzz-run      # fuzz can_protocol.c's unpack functions under ASan/UBSan (needs a libFuzzer-capable clang; see docs/TEST_PLAN.md#fuzzing)
 make sim-socketcan # Linux only: build against real vcan0/can0 instead of the virtual bus
 make run-socketcan # ...and run it (needs a real vcan0/can0 already set up)
 ```
@@ -157,6 +166,7 @@ targets/
 third_party/
   FreeRTOS-Kernel/  Vendored FreeRTOS kernel (git submodule)
 test/       74 dependency-free unit tests (no external test framework)
+fuzz/       libFuzzer harness for can_protocol.c's unpack functions
 docs/       Architecture, CAN protocol spec, test plan
 ```
 

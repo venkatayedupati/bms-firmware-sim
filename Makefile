@@ -62,7 +62,8 @@ SOCKETCAN_SIM_SRCS := $(filter-out src/can/can_hal_virtual.c,$(SIM_SRCS)) src/ca
 
 .PHONY: all sim test clean run sanitize tidy cppcheck-run coverage sim-socketcan run-socketcan \
 	freertos-build freertos-run freertos-clean \
-	tsan-sim tsan-test tsan-run asan-sim asan-test
+	tsan-sim tsan-test tsan-run asan-sim asan-test \
+	fuzz-build fuzz-run
 
 all: sim test
 
@@ -203,5 +204,36 @@ freertos-run:
 freertos-clean:
 	$(MAKE) -C targets/qemu_mps2_an385 clean
 
+# --- Fuzzing (libFuzzer) ---
+# can_protocol.c's unpack_* functions are the one place in this codebase
+# that parses attacker/peer-controlled bytes (a real CAN_RAW socket hands
+# over whatever id/dlc/data a bus frame carried); see fuzz/fuzz_can_protocol.c.
+# libFuzzer needs clang's compiler-rt fuzzer runtime -- Apple's Command Line
+# Tools clang doesn't bundle it (verified directly: link fails with
+# "libclang_rt.fuzzer_osx.a not found"), so this defaults to Homebrew's LLVM,
+# same reasoning as CLANG_TIDY above. Ubuntu's plain `clang` apt package
+# bundles it fine, so CI overrides this to `clang`.
+FUZZ_CC ?= /opt/homebrew/opt/llvm/bin/clang
+FUZZ_BUILD_DIR := build-fuzz
+FUZZ_SRCS := src/can/can_protocol.c fuzz/fuzz_can_protocol.c
+FUZZ_FLAGS := -fsanitize=fuzzer,address,undefined -g -O1 -std=c11 -Isrc
+FUZZ_TIME ?= 60
+
+$(FUZZ_BUILD_DIR):
+	mkdir -p $(FUZZ_BUILD_DIR)
+
+$(FUZZ_BUILD_DIR)/fuzz_can_protocol: $(FUZZ_SRCS) | $(FUZZ_BUILD_DIR)
+	$(FUZZ_CC) $(FUZZ_FLAGS) $(FUZZ_SRCS) -o $@
+
+fuzz-build: $(FUZZ_BUILD_DIR)/fuzz_can_protocol
+
+# -max_total_time bounds this to a fixed budget (default 60s) instead of
+# running forever like a real long-haul fuzzing campaign would; corpus
+# persists locally across runs in fuzz/corpus (gitignored) so coverage
+# built up in one run isn't thrown away on the next.
+fuzz-run: fuzz-build
+	mkdir -p fuzz/corpus
+	./$(FUZZ_BUILD_DIR)/fuzz_can_protocol -max_total_time=$(FUZZ_TIME) fuzz/corpus
+
 clean:
-	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR) $(SOCKETCAN_BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(TSAN_BUILD_DIR) $(ASAN_BUILD_DIR) $(COVERAGE_BUILD_DIR) $(SOCKETCAN_BUILD_DIR) $(FUZZ_BUILD_DIR)

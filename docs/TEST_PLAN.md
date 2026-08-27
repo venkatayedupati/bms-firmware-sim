@@ -85,6 +85,42 @@ growth actually happened (`BMS_CELL_COUNT` is 5 now, `cell_voltages_t` is
 exist went away and it was deleted outright rather than left suppressed —
 the doc it was pointing at eventually catching up with itself.)
 
+## Fuzzing
+
+`make fuzz-run` (also run in CI, `fuzz` job, 120s budget) runs a libFuzzer
+harness (`fuzz/fuzz_can_protocol.c`) against every `can_protocol_unpack_*`
+function — the one place in this codebase that parses bytes an attacker or
+malfunctioning peer ECU actually controls. A real `CAN_RAW` socket hands
+over whatever `id`/`dlc`/`data` a bus frame carried with no validation
+beyond what `can_hal_socketcan.c` does; unit tests only ever construct
+well-formed `can_frame_t` values, so they can't exercise the
+self-inconsistent combinations (e.g. `dlc` set past `CAN_MAX_DLC`, which
+`can_protocol_pack_*` never produces but nothing stops a hostile or
+corrupted frame from carrying) that a fuzzer explores automatically. The
+harness is built with `-fsanitize=fuzzer,address,undefined` so a
+memory-safety or UB violation aborts immediately with a repro input, the
+same bug classes `make sanitize` checks for, just against adversarial
+input instead of the simulator's own normal execution paths.
+
+**Result, stated honestly:** zero crashes found across tens of millions of
+executions (verified directly, both locally and in a clean Ubuntu
+container matching CI). This is the expected outcome given the code, not
+fuzzing failing to do anything: every `unpack_*` function's loops are
+bounded by compile-time constants (`BMS_CELL_COUNT`, fixed byte offsets),
+never by the attacker-controlled `dlc` field itself, so there's no
+variable-length parsing path for a malicious `dlc`/`data` combination to
+overrun. The fuzzer earns its keep by verifying that property empirically
+across the input space rather than resting on a one-time code-reading
+argument — and it's exactly the kind of check that would have caught it
+immediately if a future change *did* start indexing by `dlc` instead of a
+fixed bound.
+
+libFuzzer needs clang's compiler-rt fuzzer runtime, which Apple's Command
+Line Tools clang doesn't bundle (verified directly: linking
+`-fsanitize=fuzzer` fails with `libclang_rt.fuzzer_osx.a not found`) but
+Homebrew's LLVM and Ubuntu's plain `clang` apt package both do — same
+`FUZZ_CC` override pattern as `CLANG_TIDY` above.
+
 ## Code coverage
 
 `make coverage` (also run in CI) builds with `--coverage`, runs the test
